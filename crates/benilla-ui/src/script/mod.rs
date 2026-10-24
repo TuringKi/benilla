@@ -69,6 +69,7 @@ mod clock;
 mod cvar_checks;
 mod cvars;
 mod dressup;
+mod turtle_models;
 mod duel;
 pub(crate) mod event;
 mod extract;

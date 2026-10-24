@@ -153,7 +153,10 @@ fn new_vm<E: std::fmt::Display>(
     #[cfg(target_arch = "wasm32")]
     if crate::webenv::var("WOW_TURTLE_COMPAT").as_deref() == Some("1") {
         // Turtle's GlueXML uses Lua's global-table alias before any interface file loads.
-        if let Err(e) = script.run("_G = getfenv(0)") {
+        if let Err(e) = script
+            .run("_G = getfenv(0)")
+            .and_then(|_| script.enable_turtle_model_previews())
+        {
             error!("ui_script: Turtle global-table compatibility failed: {e}");
             return None;
         }

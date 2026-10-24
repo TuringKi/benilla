@@ -106,3 +106,11 @@ location = /ui-report {
 整合时适配了浏览器本地时区、登录报文时区偏移、分帧界面加载和新增网络命令。
 浏览器时区适配已对照 Python `zoneinfo` 验证 15 个用例，覆盖 UTC、上海、加德满都、
 纽约、悉尼的日历字段、夏令时、时间往返和认证时区偏移。
+
+## Turtle_ShopUI 模型预览
+
+Turtle 模式支持 `PlayerModel`/`DressUpModel:SetUnit(数字 displayId)`，通过已有的
+生物显示模型渲染流程加载模型、皮肤和动画；`RefreshUnit()` 会保留该显示编号。
+例如商城的 20418（幽灵虎）、20506、18778、11444 已验证对应模型与贴图可读。
+此扩展仅在显式开启 Turtle 模式后启用，普通单位 API 的名称校验保持原有规则。
+当前版本也支持 `SetPortraitToTexture(textureObject, texturePath)` 的纹理对象参数。
