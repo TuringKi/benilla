@@ -47,6 +47,10 @@ pub(crate) struct CreateLook {
 /// The select screen's look: the roster entry's appearance and equipment, off `SMSG_CHAR_ENUM`.
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) struct SelectLook {
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) guild_id: u32,
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) emblem: Option<benilla_formats::GuildEmblem>,
     pub(crate) race: u8,
     pub(crate) sex: u8,
     pub(crate) skin: u8,
@@ -76,6 +80,10 @@ pub(crate) struct PetLook {
 impl From<&benilla_protocol::Character> for SelectLook {
     fn from(c: &benilla_protocol::Character) -> Self {
         Self {
+            #[cfg(target_arch = "wasm32")]
+            guild_id: c.guild_id,
+            #[cfg(target_arch = "wasm32")]
+            emblem: None,
             race: c.race,
             sex: c.gender.min(1),
             skin: c.skin,

@@ -77,6 +77,9 @@ pub struct Character {
     pub zone: u32,
     pub map: u32,
     pub position: Vector3d,
+    /// The guild queried for the browser selection model's tabard.
+    #[cfg(target_arch = "wasm32")]
+    pub guild_id: u32,
     /// `CHARACTER_FLAG_*` bits.
     pub flags: u32,
     /// Equipment order: head, neck, shoulders, shirt, chest, waist, legs, feet, wrists, hands,
@@ -142,6 +145,8 @@ impl Character {
             zone,
             map,
             position,
+            #[cfg(target_arch = "wasm32")]
+            guild_id: _guild_id,
             flags,
             equipment,
             pet_display_id,

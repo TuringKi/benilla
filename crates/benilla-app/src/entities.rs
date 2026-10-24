@@ -30,6 +30,8 @@ use attach::{attach_entity_visuals, build_dressup_preview, build_glue_pet, build
 
 /// Composited body skins by look, built off the main thread.
 mod skin_composite;
+#[cfg(target_arch = "wasm32")]
+mod web_diagnostics;
 use skin_composite::{land_skin_composites, SkinComposites, SkinKey, SkinSections};
 
 /// The dynamic point lights an entity's own model carries, such as a held torch.
@@ -623,6 +625,8 @@ pub(crate) struct EntitiesPlugin;
 
 impl Plugin for EntitiesPlugin {
     fn build(&self, app: &mut App) {
+        #[cfg(target_arch = "wasm32")]
+        app.add_systems(Update, web_diagnostics::publish.after(EntityVisualsSet));
         app.add_systems(
             Update,
             publish_world_units
@@ -916,7 +920,15 @@ fn setup_entities(
         Ok(geosets) => commands.insert_resource(Characters(geosets)),
         Err(e) => warn!("character geosets unavailable, players show every geoset: {e:#}"),
     }
-    match CharSections::load(&mut chain) {
+    #[cfg(not(target_arch = "wasm32"))]
+    let sections = CharSections::load(&mut chain);
+    #[cfg(target_arch = "wasm32")]
+    let sections = if crate::webenv::var("WOW_TURTLE_COMPAT").as_deref() == Some("1") {
+        CharSections::load_turtle(&mut chain)
+    } else {
+        CharSections::load(&mut chain)
+    };
+    match sections {
         Ok(sections) => {
             commands.insert_resource(SkinSections::new(sections, world_assets.chain.clone()))
         }

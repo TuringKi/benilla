@@ -24,6 +24,8 @@ mod feed;
 mod lines;
 mod sort;
 mod steps;
+#[cfg(target_arch = "wasm32")]
+pub(crate) mod web_preview;
 
 pub(crate) use sort::RosterRow;
 use sort::{SortField, SortStack};

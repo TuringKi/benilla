@@ -102,6 +102,7 @@ pub(crate) struct StockFeed {
 /// Feed the glue booth from the glue VM while the stock glue screens are up, and stand it down
 /// once they are not (the world entered, the VM gone).
 pub(crate) fn feed_stock_glue_preview(
+    #[cfg(target_arch = "wasm32")] guilds: Option<Res<crate::ui_guild::GuildState>>,
     script: Option<NonSend<UiScript>>,
     mgr: NonSend<SharedGlueMgr>,
     state: Option<Res<State<crate::client_state::ClientState>>>,
@@ -142,6 +143,15 @@ pub(crate) fn feed_stock_glue_preview(
         }
         None => (None, None, 0.0, None),
     };
+    #[cfg(target_arch = "wasm32")]
+    let look = look.map(|mut look| {
+        if let GlueLook::Select(selected) = &mut look {
+            selected.emblem = guilds
+                .as_deref()
+                .and_then(|g| crate::ui_guild::web_preview::emblem(g, selected.guild_id));
+        }
+        look
+    });
     // A pane that was not the one shown last frame has just shown: its OnShow (`0x46fa60`).
     if shown.is_some() && shown != feed.shown {
         preview.shown = preview.shown.wrapping_add(1);

@@ -893,6 +893,10 @@ async fn world(
                     },
                 };
                 note_warden(&session, &mut warden_noted);
+                #[cfg(target_arch = "wasm32")]
+                for response in session.take_roster_guild_responses() {
+                    let _ = events_tx.send(SessionEvent::GuildQueryResponse(response));
+                }
                 let (action, code) = match answer {
                     Parked::Exit => return Ok(WorldEnd::Cycle(Cycle::Exit)),
                     Parked::Repark => return Ok(WorldEnd::Cycle(Cycle::Repark)),

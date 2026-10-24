@@ -192,8 +192,13 @@ pub(in crate::entities) fn build_glue_preview(
         hair_color,
         facial_hair,
         equipment,
-        // No crest: `SMSG_CHAR_ENUM` has no emblem and there is no session to query, so a guild
-        // tabard wears its own art, as with the reference's empty guild cache.
+        #[cfg(target_arch = "wasm32")]
+        emblem: match look {
+            GlueLook::Select(l) => l.emblem,
+            GlueLook::Create(_) => None,
+        },
+        // The native selection preview has no guild query on its parked link yet.
+        #[cfg(not(target_arch = "wasm32"))]
         emblem: None,
         flags,
         // The select build skips the ranged slot (`0x472bfe`).

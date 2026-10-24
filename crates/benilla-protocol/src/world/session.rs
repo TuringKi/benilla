@@ -12,6 +12,9 @@ use super::reader::WorldReader;
 use super::writer::WorldWriter;
 use super::{recv_packet, send_packet, LinkTraffic};
 
+#[cfg(target_arch = "wasm32")]
+mod web_roster_guild;
+
 /// Read timeout through `player_login`, where each step awaits one reply. Deviation: 10 s of
 /// silence ends the wait, where the reference has no timer and waits for the reply, a disconnect
 /// or the player's Cancel (`0x46b720`; its connect reports only success or a socket error,
@@ -60,6 +63,8 @@ pub struct WorldSession {
 /// half across a split so [`WorldSession::rejoin`] has it back.
 #[derive(Default)]
 pub(super) struct LinkFacts {
+    #[cfg(target_arch = "wasm32")]
+    roster_guild_responses: Vec<messages::GuildQueryResponse>,
     /// Roster guid to race, so [`WorldSession::player_login`] can pick the chat language.
     roster_races: std::collections::HashMap<u64, u8>,
     /// The billing group the last `SMSG_AUTH_RESPONSE` to carry one gave. Deviation: zeros until
@@ -340,6 +345,8 @@ impl WorldSession {
             match packet {
                 ServerPacket::CharEnum { characters } => {
                     self.link.roster_races = characters.iter().map(|c| (c.guid, c.race)).collect();
+                    #[cfg(target_arch = "wasm32")]
+                    self.query_roster_guilds(&characters)?;
                     return Ok(characters);
                 }
                 other => self.note_stray(other),
@@ -374,6 +381,11 @@ impl WorldSession {
     /// is kept for the world entry when the server sends it this early; the account-data, cache
     /// and Warden packets the server interleaves here are skipped.
     fn note_stray(&mut self, packet: ServerPacket) {
+        #[cfg(target_arch = "wasm32")]
+        if let ServerPacket::GuildQueryResponse(response) = packet {
+            self.link.roster_guild_responses.push(response);
+            return;
+        }
         if let ServerPacket::TutorialFlags(flags) = packet {
             self.tutorial_flags = Some(flags.bytes);
         }

@@ -3,18 +3,30 @@
   const logs = [];
   const seen = new Set();
   const lootEvents = [];
-  const diagnostic = { lootEvents, revision: 'ui-20261024-turtle-shop-models', logs, frames: null };
+  const diagnostic = { lootEvents, revision: 'ui-20261024-turtle-extra-skins', logs, frames: null };
   window.__wenilla_ui_diagnostic = diagnostic;
   for (const level of ['log', 'warn', 'error']) {
     const original = console[level].bind(console);
     console[level] = (...args) => {
       original(...args);
       const line = args.map(String).join(' ');
-      if (level === 'log' && !/^(?:%c)?(?:WARN|ERROR)\b|runtime error|texture miss|body skin composite failed/i.test(line)) return;
-      if (!/ui_script|WGSL error|ShaderModule|GPUValidationError|WebGPU|BindGroup|RenderPipeline|DrawIndexed|GPUQueue|texture miss|body skin composite|skin composite|UI texture|sprite.*(?:missing|failed)/i.test(line)) return;
+      if (level === 'log' && !/^(?:%c)?(?:WARN|ERROR)\b|runtime error|texture miss|body skin composite failed|failed to load|failed to process/i.test(line)) return;
+      if (!/ui_script|WGSL error|ShaderModule|GPUValidationError|WebGPU|BindGroup|RenderPipeline|DrawIndexed|GPUQueue|texture miss|body skin composite|skin composite|UI texture|sprite.*(?:missing|failed)|asset|terrain|wmo|m2|shader|pipeline|panicked/i.test(line)) return;
       if (seen.has(line) || logs.length >= 100) return;
       seen.add(line);
       logs.push(line.slice(0, 2500));
+    };
+  }
+  if (window.GPUAdapter?.prototype?.requestDevice) {
+    const request = GPUAdapter.prototype.requestDevice;
+    GPUAdapter.prototype.requestDevice = async function (...args) {
+      const device = await request.apply(this, args);
+      diagnostic.gpu = { adapter: this.info, features: [...device.features] };
+      device.addEventListener('uncapturederror', event => {
+        console.error('WebGPU uncaptured error:', event.error?.message ?? String(event.error));
+      });
+      device.lost.then(info => console.error('WebGPU device lost:', info.reason, info.message));
+      return device;
     };
   }
   const query = String.raw`
@@ -61,7 +73,9 @@ return table.concat(out, "\n")`;
         try { diagnostic.frames = await window.wenilla.lua(query, 4000); }
         catch { /* VM can be between glue and world; retry later. */ }
       }
-      const payload = { ...diagnostic, logs: logs.slice(0, 24), frames: [...(diagnostic.frames || []), "LOOT_EVENTS " + JSON.stringify(lootEvents)], phase: window.wenilla?.state?.session?.state ?? null };
+      const state = window.wenilla?.state;
+      const world = { map: state?.map, pos: state?.self?.pos, facing: state?.self?.facing, renderer: window.__wenilla_render_diagnostic };
+      const payload = { ...diagnostic, logs: logs.slice(0, 24), frames: [...(diagnostic.frames || []), "LOOT_EVENTS " + JSON.stringify(lootEvents), "WORLD " + JSON.stringify(world)], phase: window.wenilla?.state?.session?.state ?? null };
       let body = JSON.stringify(payload);
       while (new TextEncoder().encode(body).length > 60000 && payload.logs.length) {
         payload.logs.pop();
