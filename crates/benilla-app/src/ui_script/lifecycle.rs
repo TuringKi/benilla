@@ -815,6 +815,12 @@ fn entry_prepare(world: &mut World, script: &mut UiScript, seat: LoadSeat) -> En
     // The world map's continent and zone lists: static DBC data in the reference, read at file
     // scope (Astrolabe builds its whole zone table from `GetMapContinents`/`GetMapZones` there).
     crate::ui_world_map::seed_world_map_catalog(world, script);
+    // Bagshui reads the DBC-backed auction classes at file scope, before the first UI feed.
+    #[cfg(target_arch = "wasm32")]
+    script.set_auction_item_classes(crate::ui_auction::categories(
+        world.get_resource::<crate::ui_items::ItemClasses>(),
+        world.get_resource::<crate::ui_items::ItemSubClasses>(),
+    ));
     // Screen size and measurer before the first `<OnLoad>`: this VM is loaded before `tick_script`
     // seats either, and the load measures text (the stock tab template's `OnLoad` sizes from its
     // text width, `UIPanelTemplates.xml:370-373`), which answers 0 with no measurer.

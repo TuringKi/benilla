@@ -3,7 +3,7 @@
   const logs = [];
   const seen = new Set();
   const lootEvents = [];
-  const diagnostic = { lootEvents, revision: 'ui-20261024-external-addons', logs, frames: null };
+  const diagnostic = { lootEvents, revision: 'ui-20261024-bagshui', logs, frames: null };
   window.__wenilla_ui_diagnostic = diagnostic;
   for (const level of ['log', 'warn', 'error']) {
     const original = console[level].bind(console);
@@ -31,7 +31,7 @@
   }
   const query = String.raw`
 local out = {}
-for _, name in ipairs({"UIParent", "MainMenuBar", "ActionButton1", "ActionButton1Icon", "TargetFrame", "CharacterFrame", "GameTooltip", "ContainerFrame1", "GossipFrame"}) do
+for _, name in ipairs({"UIParent", "MainMenuBar", "ActionButton1", "ActionButton1Icon", "TargetFrame", "CharacterFrame", "GameTooltip", "ContainerFrame1", "GossipFrame", "BagshuiBagsFrame"}) do
   local f = getglobal(name)
   local row = name .. ":exists=" .. tostring(f ~= nil)
   if f then
@@ -44,7 +44,7 @@ table.insert(out, "action1=" .. tostring(GetActionTexture(1)))
 table.insert(out, "bag0=" .. tostring(GetContainerNumSlots(0)))
 local ok, extra = pcall(function()
   local lines = {}
-  for _, addon in ipairs({"DungeonClear", "pfQuest", "pfQuest-turtle", "AtlasLoot", "Bagnon"}) do
+  for _, addon in ipairs({"DungeonClear", "pfQuest", "pfQuest-turtle", "AtlasLoot", "Bagshui", "Bagnon"}) do
     local name, title, notes, enabled, loadable, reason = GetAddOnInfo(addon)
     table.insert(lines, "addon=" .. addon .. ",loaded=" .. tostring(IsAddOnLoaded(addon)) .. ",reason=" .. tostring(reason))
   end
