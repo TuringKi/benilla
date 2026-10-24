@@ -1456,7 +1456,13 @@ pub(super) fn dispatch(w: &mut WorldWriter, cmd: ClientCommand) -> Result<()> {
             slot,
             spell_index,
             target,
-        } => w.use_item(bag_index, slot, spell_index, target),
+        } => {
+            #[cfg(target_arch = "wasm32")]
+            crate::web_item_trace::record(format!(
+                "USE_ITEM send bag={bag_index} slot={slot} spell_index={spell_index}"
+            ));
+            w.use_item(bag_index, slot, spell_index, target)
+        }
         ClientCommand::OpenItem { bag_index, slot } => w.open_item(bag_index, slot),
         ClientCommand::WrapItem {
             gift_bag,

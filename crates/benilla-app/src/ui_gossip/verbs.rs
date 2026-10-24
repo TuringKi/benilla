@@ -13,7 +13,11 @@ use crate::net::{ClientCommand, NetCommands};
 use crate::ui_quest::{row_is_active, row_is_one_click};
 
 /// The option slots the store holds (`0x4e2343`).
+#[cfg(not(target_arch = "wasm32"))]
 const OPTION_SLOTS: u32 = 16;
+// Turtle's item gossip menus use VMaNGOS's full 32-option wire limit.
+#[cfg(target_arch = "wasm32")]
+const OPTION_SLOTS: u32 = 32;
 
 /// The gossip menu and the socket its selects send through.
 #[derive(SystemParam)]

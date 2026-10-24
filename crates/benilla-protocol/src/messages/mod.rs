@@ -21,6 +21,8 @@ mod game_time;
 mod gameobject;
 mod gm_ticket;
 mod gossip;
+#[cfg(any(target_arch = "wasm32", test))]
+mod turtle_gossip;
 mod group;
 mod guild;
 mod instance;

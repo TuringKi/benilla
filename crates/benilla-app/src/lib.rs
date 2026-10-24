@@ -196,6 +196,8 @@ mod webbridge;
 /// `benilla_app::webenv::var` by that exact path; every in-crate caller still just writes
 /// `crate::webenv::var` like any other module.
 pub mod webenv;
+#[cfg(target_arch = "wasm32")]
+mod web_item_trace;
 mod webprogress;
 mod world_backdrop;
 mod world_console;

@@ -135,6 +135,12 @@ impl CastCore<'_> {
     /// `StartMeleeAttack`'s reads the caster's precast spell (`0x5ecc56`-`0x5ecc85`). What it
     /// popped is returned for the caller's local teardown.
     pub(crate) fn cancel(&mut self, failed: bool, send: bool, reason: u8) -> Option<Inflight> {
+        #[cfg(target_arch = "wasm32")]
+        if self.pending.record_spell() == 8690 {
+            crate::web_item_trace::record(format!(
+                "hearthstone cancel failed={failed} send={send} reason={reason:#04x}"
+            ));
+        }
         self.cancel_for_caster(failed, send, reason).0
     }
 
@@ -250,6 +256,13 @@ impl CastCore<'_> {
     /// refusal (`0x6e2213 sete`); another spell in flight fires nothing (`0x6e2228`), nor does
     /// "Another action is in progress" (`0x6e2234`); anything else fires the failure's edge.
     pub(crate) fn report(&mut self, fail: CastFail, from_server: bool, reaches_tail: bool) {
+        #[cfg(target_arch = "wasm32")]
+        if fail.spell_id == 8690 {
+            crate::web_item_trace::record(format!(
+                "hearthstone refusal reason={:#04x} server={from_server} tail={reaches_tail}",
+                fail.reason
+            ));
+        }
         let (spell_id, reason) = (fail.spell_id, fail.reason);
         self.reports.refused(fail);
         if !reaches_tail {

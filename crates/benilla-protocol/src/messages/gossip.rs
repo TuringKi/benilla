@@ -2,7 +2,9 @@
 
 use std::io;
 
-use crate::wire::{capacity_hint, read_cstring, read_f32_le, read_u32_le, read_u64_le, read_u8};
+use crate::wire::{read_cstring, read_f32_le, read_u32_le};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::wire::{capacity_hint, read_u64_le, read_u8};
 
 /// One `SMSG_GOSSIP_MESSAGE` option: `index` is echoed as `gossipListId` on select, `icon` is a
 /// `GOSSIP_ICON_*` (0 chat, 1 vendor, 2 taxi, 3 trainer, …), `coded` asks for a code.
@@ -53,6 +55,10 @@ pub fn npc_text_query(text_id: u32, guid: u64) -> Vec<u8> {
 }
 
 /// Read `SMSG_GOSSIP_MESSAGE` (vmangos `GossipDef.cpp:180-225`); 1.12 options have no box money.
+#[cfg(target_arch = "wasm32")]
+pub(super) use super::turtle_gossip::read_extended_gossip_message as read_gossip_message;
+
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn read_gossip_message(
     r: &mut &[u8],
 ) -> io::Result<(u64, u32, Vec<GossipOption>, Vec<QuestOption>)> {

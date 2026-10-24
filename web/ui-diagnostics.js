@@ -3,7 +3,7 @@
   const logs = [];
   const seen = new Set();
   const lootEvents = [];
-  const diagnostic = { lootEvents, revision: 'ui-20261024-turtle-extra-skins', logs, frames: null };
+  const diagnostic = { lootEvents, revision: 'ui-20261024-extended-item-gossip', logs, frames: null };
   window.__wenilla_ui_diagnostic = diagnostic;
   for (const level of ['log', 'warn', 'error']) {
     const original = console[level].bind(console);
@@ -31,7 +31,7 @@
   }
   const query = String.raw`
 local out = {}
-for _, name in ipairs({"UIParent", "MainMenuBar", "ActionButton1", "ActionButton1Icon", "TargetFrame", "CharacterFrame", "GameTooltip", "ContainerFrame1"}) do
+for _, name in ipairs({"UIParent", "MainMenuBar", "ActionButton1", "ActionButton1Icon", "TargetFrame", "CharacterFrame", "GameTooltip", "ContainerFrame1", "GossipFrame"}) do
   local f = getglobal(name)
   local row = name .. ":exists=" .. tostring(f ~= nil)
   if f then
@@ -51,6 +51,17 @@ local ok, extra = pcall(function()
     local _, _, id = string.find(link, "item:(%d+)")
     table.insert(lines, "equipment=" .. tostring(slot) .. ",item=" .. tostring(id) .. ",icon=" .. tostring(GetInventoryItemTexture("player", slot)))
   end
+  for bag = 0, 4 do
+    for slot = 1, GetContainerNumSlots(bag) do
+      local link = GetContainerItemLink(bag, slot) or ""
+      if string.find(link, "item:6948:") then
+        local texture, count, locked = GetContainerItemInfo(bag, slot)
+        local start, duration, enabled = GetContainerItemCooldown(bag, slot)
+        table.insert(lines, "hearthstone=bag:" .. bag .. ",slot:" .. slot .. ",count:" .. tostring(count) .. ",locked:" .. tostring(locked) .. ",cooldown:" .. tostring(start) .. "/" .. tostring(duration) .. "/" .. tostring(enabled))
+      end
+    end
+  end
+  table.insert(lines, "caster=combat:" .. tostring(UnitAffectingCombat("player")) .. ",dead:" .. tostring(UnitIsDeadOrGhost("player")) .. ",targeting:" .. tostring(SpellIsTargeting()) .. ",casting:" .. tostring(CastingBarFrame and CastingBarFrame.casting))
   table.insert(lines, "loot=" .. tostring(GetNumLootItems()) .. ",window=" .. tostring(LootFrame and LootFrame:IsVisible()))
   local cvOk, auto = pcall(GetCVar, "autoLootDefault")
   table.insert(lines, "autoLootDefault=" .. tostring(cvOk and auto))
@@ -75,7 +86,7 @@ return table.concat(out, "\n")`;
       }
       const state = window.wenilla?.state;
       const world = { map: state?.map, pos: state?.self?.pos, facing: state?.self?.facing, renderer: window.__wenilla_render_diagnostic };
-      const payload = { ...diagnostic, logs: logs.slice(0, 24), frames: [...(diagnostic.frames || []), "LOOT_EVENTS " + JSON.stringify(lootEvents), "WORLD " + JSON.stringify(world)], phase: window.wenilla?.state?.session?.state ?? null };
+      const payload = { ...diagnostic, logs: logs.slice(0, 24), frames: [...(diagnostic.frames || []), "LOOT_EVENTS " + JSON.stringify(lootEvents), "WORLD " + JSON.stringify(world), "ITEM_TRACE " + JSON.stringify(window.__wenilla_item_trace || [])], phase: window.wenilla?.state?.session?.state ?? null };
       let body = JSON.stringify(payload);
       while (new TextEncoder().encode(body).length > 60000 && payload.logs.length) {
         payload.logs.pop();
@@ -94,7 +105,7 @@ return table.concat(out, "\n")`;
   const eventTimer = setInterval(() => {
     if (!window.wenilla?.on) return;
     clearInterval(eventTimer);
-    for (const event of ['LOOT_OPENED', 'LOOT_CLOSED', 'LOOT_SLOT_CLEARED']) {
+    for (const event of ['LOOT_OPENED', 'LOOT_CLOSED', 'LOOT_SLOT_CLEARED', 'UI_ERROR_MESSAGE', 'SPELLCAST_FAILED', 'SPELLCAST_INTERRUPTED', 'SPELLCAST_START', 'SPELLCAST_STOP', 'GOSSIP_SHOW', 'GOSSIP_CLOSED']) {
       window.wenilla.on(event, args => {
         lootEvents.push({ event, at: Math.round(performance.now()), args });
         if (lootEvents.length > 32) lootEvents.shift();

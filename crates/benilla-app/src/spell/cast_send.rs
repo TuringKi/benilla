@@ -491,6 +491,15 @@ impl CastLadder<'_, '_> {
         on_object: Option<u64>,
         hold: Option<HeldCast>,
     ) {
+        #[cfg(target_arch = "wasm32")]
+        if spell_id == 8690 {
+            crate::web_item_trace::record(format!(
+                "hearthstone attempt permitted={} commit={commit:?} mount={:?} flags={:?}",
+                self.permitted(),
+                ctx.rel.self_store.map(|s| s.0.unit_mount_display_id()),
+                ctx.rel.self_store.map(|s| s.0.unit_flags())
+            ));
+        }
         if !self.permitted() {
             debug!("cast {spell_id} refused by the protected-action gate, silently");
             return;
