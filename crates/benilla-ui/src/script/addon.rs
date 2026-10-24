@@ -676,6 +676,13 @@ impl DemandLoad<'_> {
                 reader(&format!("Interface/AddOns/{req}"))
             }))
         } else {
+            // Browser addons use the host's data overlay, including LoadAddOn's dependencies.
+            #[cfg(target_arch = "wasm32")]
+            if let Some(reader) = model.addons_chain_reader.clone() {
+                return Some(Box::new(move |req: &str| {
+                    reader(&format!("Interface/AddOns/{req}"))
+                }));
+            }
             let root = model.addons_root.clone()?;
             Some(Box::new(move |req: &str| read_under(&root, req)))
         }

@@ -14,6 +14,8 @@ use benilla_world::schedule::WorldStage;
 
 /// The addon folder: discovery, manifests, the enable file and the load walk.
 pub(crate) mod addons;
+#[cfg(any(target_arch = "wasm32", test))]
+mod web_addons;
 mod content;
 pub(crate) mod extract;
 /// The stock glue screens as the session and the instruments see them.

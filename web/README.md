@@ -47,6 +47,14 @@ session cookie. The page derives `ws://`/`wss://` from its own origin, so any ht
 Each tab is a full independent client with its own upstream connection; players need their
 own accounts (a second login on one account kicks the first, as in the real client).
 
+For Lua addons, pass `--addons /path/to/AddOns` to `wenilla-host`. Each subfolder must contain
+its matching manifest, for example `AddOns/DungeonClear/DungeonClear.toc`. The browser discovers
+these addons through `Interface/AddOns/__addons.txt` and loads their Lua, XML and art over the
+existing data route, including dependencies and `LoadAddOn`. The directory is separate from
+the read-only game install. Addon reads match filename casing as on Windows and use `no-cache`;
+refresh the page after installing or updating an addon. The normal AddOns screen controls which
+addons load for a character.
+
 ## Things to know
 
 - **Hosting behind a login** — `crates/wenilla-realm` wraps this host's routers behind a session

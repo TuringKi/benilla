@@ -29,6 +29,7 @@ use tower_http::set_header::SetResponseHeaderLayer;
 #[derive(Clone)]
 pub struct DataState {
     pub chain: Arc<Chain>,
+    addons: Option<std::path::PathBuf>,
     index: Arc<IndexCache>,
 }
 
@@ -61,6 +62,11 @@ impl IndexCache {
 /// Build the `/data/*` router. Kept separate from `static_site`'s and `ws`'s so `main.rs` can
 /// merge them with `Router::merge` and each test file can stand its half up alone.
 pub fn router(chain: Arc<Chain>) -> Router {
+    router_with_addons(chain, None)
+}
+
+/// Serve external addon files over the existing data namespace without changing the install.
+pub fn router_with_addons(chain: Arc<Chain>, addons: Option<std::path::PathBuf>) -> Router {
     Router::new()
         .route("/data/__index", get(index))
         // axum's matchit picks the more specific literal route above over this wildcard on its
@@ -82,6 +88,7 @@ pub fn router(chain: Arc<Chain>) -> Router {
         ))
         .with_state(DataState {
             chain,
+            addons,
             index: Arc::default(),
         })
 }
@@ -138,6 +145,7 @@ async fn file(method: Method, uri: Uri, State(state): State<DataState>) -> Respo
     let raw = uri.path().strip_prefix("/data/").unwrap_or("");
     let decoded = percent_encoding::percent_decode_str(raw).decode_utf8_lossy();
     let name = decoded.replace('/', "\\");
+    let external = state.addons.is_some() && crate::addons::is_addon_path(&name);
     // Before the move into `spawn_blocking` — the classification is pure string math on the
     // name and yields a `&'static str`, so it costs nothing to take it out of the task's way.
     let content_type = content_type(&name);
@@ -145,7 +153,17 @@ async fn file(method: Method, uri: Uri, State(state): State<DataState>) -> Respo
     let chain = Arc::clone(&state.chain);
     // `Chain::read` does synchronous file I/O (through benilla-mpq's blocking reads); running it
     // on the async runtime thread would stall every other in-flight request behind one disk seek.
-    let read = tokio::task::spawn_blocking(move || chain.read(&name)).await;
+    let read = tokio::task::spawn_blocking(move || {
+        if let Some(bytes) = state
+            .addons
+            .as_deref()
+            .and_then(|root| crate::addons::read(root, &name))
+        {
+            return Ok(bytes);
+        }
+        chain.read(&name)
+    })
+    .await;
     match read {
         Ok(Ok(bytes)) => {
             let body = if method == Method::HEAD {
@@ -161,7 +179,11 @@ async fn file(method: Method, uri: Uri, State(state): State<DataState>) -> Respo
                     // browser (they never change under one name), never by a shared cache.
                     (
                         header::CACHE_CONTROL,
-                        "private, max-age=31536000, immutable",
+                        if external {
+                            "private, no-cache"
+                        } else {
+                            "private, max-age=31536000, immutable"
+                        },
                     ),
                 ],
                 body,

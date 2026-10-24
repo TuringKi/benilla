@@ -400,6 +400,12 @@ fn sweep_moves(last: &mut BTreeSet<String>, now: BTreeSet<String>) -> bool {
 
 /// The player's own addons: every folder under the AddOns root with a `<Name>.toc`, in
 /// [`sort_by_directory_order`].
+#[cfg(target_arch = "wasm32")]
+fn discover_folder() -> Vec<Addon> {
+    super::web_addons::discover()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn discover_folder() -> Vec<Addon> {
     let Some(root) = root() else {
         return Vec::new();

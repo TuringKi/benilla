@@ -37,6 +37,9 @@ struct Cli {
     /// itself reads on the desktop.
     #[arg(long)]
     data: PathBuf,
+    /// Optional external AddOns directory, served separately from the read-only game install.
+    #[arg(long)]
+    addons: Option<PathBuf>,
     /// Host the `/ws/{port}` proxy dials for the allowed ports — the mangos boxes this host
     /// itself runs against, so it defaults to loopback.
     #[arg(long, default_value = "127.0.0.1")]
@@ -61,7 +64,7 @@ async fn main() -> Result<()> {
     );
     tracing::info!(data = %cli.data.display(), "patch chain open");
 
-    let app = wenilla_host::data::router(chain)
+    let app = wenilla_host::data::router_with_addons(chain, cli.addons)
         .merge(wenilla_host::ws::router(
             cli.upstream.clone(),
             [cli.auth_port, cli.world_port],

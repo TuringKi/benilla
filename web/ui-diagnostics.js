@@ -3,7 +3,7 @@
   const logs = [];
   const seen = new Set();
   const lootEvents = [];
-  const diagnostic = { lootEvents, revision: 'ui-20261024-extended-item-gossip', logs, frames: null };
+  const diagnostic = { lootEvents, revision: 'ui-20261024-external-addons', logs, frames: null };
   window.__wenilla_ui_diagnostic = diagnostic;
   for (const level of ['log', 'warn', 'error']) {
     const original = console[level].bind(console);
@@ -44,6 +44,10 @@ table.insert(out, "action1=" .. tostring(GetActionTexture(1)))
 table.insert(out, "bag0=" .. tostring(GetContainerNumSlots(0)))
 local ok, extra = pcall(function()
   local lines = {}
+  for _, addon in ipairs({"DungeonClear", "pfQuest", "pfQuest-turtle", "AtlasLoot", "Bagnon"}) do
+    local name, title, notes, enabled, loadable, reason = GetAddOnInfo(addon)
+    table.insert(lines, "addon=" .. addon .. ",loaded=" .. tostring(IsAddOnLoaded(addon)) .. ",reason=" .. tostring(reason))
+  end
   local raceName, raceFile = UnitRace("player")
   table.insert(lines, "appearance=" .. tostring(raceFile) .. ",sex=" .. tostring(UnitSex("player")))
   for _, slot in ipairs({1, 3, 5, 6, 7, 8, 9, 10, 15, 19}) do
