@@ -10,7 +10,8 @@
 //! as the client holds no focus id or radius, and the server's refusal is the only feedback.
 
 use std::collections::VecDeque;
-use std::time::Instant;
+// Use the same clock as cooldowns on native and WASM.
+use bevy::platform::time::Instant;
 
 use bevy::prelude::*;
 

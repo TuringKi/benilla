@@ -28,7 +28,8 @@ use bevy::render::renderer::RenderAdapterInfo;
 use bevy::window::{
     Monitor, MonitorSelection, PresentMode, PrimaryWindow, WindowMode, WindowResolution,
 };
-use std::time::{Duration, Instant};
+use bevy::platform::time::Instant;
+use std::time::Duration;
 
 /// `$WOW_NOVSYNC=1`: uncap for this session only; it never reaches `config.toml` (the
 /// `session_owned` set in [`crate::cvars`]).

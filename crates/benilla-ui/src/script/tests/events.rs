@@ -282,6 +282,39 @@ fn mid_dispatch_removal_of_the_next_stops_and_append_is_visited() {
     );
 }
 
+/// The event tap (`Model::event_tap`): off by default and free; on, it copies every fire —
+/// registered listener or not — in dispatch order, and a drain empties it.
+#[test]
+fn the_event_tap_copies_every_fire_and_nothing_when_off() {
+    let mut s = script();
+    s.run(r#"local f = CreateFrame("Frame", "TapSpy"); f:RegisterEvent("UNIT_HEALTH")"#)
+        .unwrap();
+    s.fire_event("UNIT_HEALTH", vec![ScriptValue::Str("player".into())]);
+    assert!(s.take_tapped_events().is_empty(), "off by default");
+
+    s.set_event_tap(true);
+    s.fire_event(
+        "UNIT_HEALTH",
+        vec![ScriptValue::Str("player".into()), ScriptValue::Int(42)],
+    );
+    s.fire_event("NOBODY_LISTENS", vec![ScriptValue::Bool(true)]);
+    s.queue_event("QUEUED_ONE", vec![]);
+    s.tick(0.016);
+    let tapped = s.take_tapped_events();
+    let names: Vec<&str> = tapped.iter().map(|(n, _)| n.as_str()).collect();
+    assert_eq!(names, ["UNIT_HEALTH", "NOBODY_LISTENS", "QUEUED_ONE"]);
+    assert_eq!(
+        tapped[0].1,
+        vec![ScriptValue::Str("player".into()), ScriptValue::Int(42)]
+    );
+    assert!(s.take_tapped_events().is_empty(), "a drain empties it");
+
+    s.set_event_tap(false);
+    s.fire_event("UNIT_HEALTH", vec![]);
+    assert!(s.take_tapped_events().is_empty(), "off again");
+    assert!(s.errors().is_empty(), "{:?}", s.errors());
+}
+
 /// `RegisterAllEvents` (`0x774c20`, table `0x878ec0`, argc 1, arity 0) registers the frame on every
 /// event the VM's table holds (`0x7023e0`); an event off the table reaches no frame, as events
 /// fire by id (`0x703e50`). `UnregisterAllEvents` clears it, which is how AceEvent-2.0 gets back to

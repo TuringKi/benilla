@@ -3,6 +3,11 @@
 **/*.rs.bk
 # Cargo.lock IS committed (this workspace produces binaries).
 
+# The wasm-bindgen build output (`scripts/web-build.sh`) — regenerated
+# from `crates/wenilla` + `web/index.html`/`web/wasi_stubs.js` on every build, and the .wasm
+# alone can run tens of MB.
+/web/dist/
+
 # --- Blizzard-owned content: NEVER commit ---
 # The user's legally-installed 1.12.1 client. Read at runtime; not redistributed.
 /WoW
@@ -42,3 +47,10 @@ __pycache__/
 # The vanilla addon corpus the UI engine's real-addon tests read (third-party content): a symlink
 # beside `WoW`, or `BENILLA_ADDON_CORPUS`.
 /wow-addons-vanilla
+
+# The C sysroot for the wasm Lua build — fetched by scripts/web-setup.sh, ~300 MB
+/tools/wasi-sdk/
+/tools/binaryen/
+
+# Local browser UI diagnostic reports.
+/scripts/ui-browser-reports.jsonl

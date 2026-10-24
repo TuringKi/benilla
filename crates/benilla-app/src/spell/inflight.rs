@@ -2,7 +2,10 @@
 //! `0xceca88`), the queued on-next-swing strike, the running channel, the auto-repeat key
 //! (`0xceac30`), and the local abort on a move, jump or Esc (`AbortCast 0x6e4940`).
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+// Bevy's `Instant`, not std's: std's panics on wasm32, and these stores trade with `UiClock::anchor`.
+use bevy::platform::time::Instant;
 
 use bevy::prelude::*;
 

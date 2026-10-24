@@ -4,7 +4,9 @@
 //! A meeting stone's click runs the stone's own use slot, which refuses a join client-side or
 //! sends `CMSG_MEETINGSTONE_JOIN`, never the shared `CMSG_GAMEOBJ_USE`.
 
-use std::time::Instant;
+// `std::time::Instant` has no monotonic clock behind it in a browser and panics there;
+// bevy's re-export is std's natively and `web_time`'s on wasm32.
+use bevy::platform::time::Instant;
 
 use benilla_protocol::messages::{BattlefieldStatus, MeetingStoneNotice};
 use benilla_ui::script::{ScriptValue, UiScript};
@@ -998,7 +1000,7 @@ mod net {
 
     fn on_raid_group_only(In(ev): In<SessionEvent>, mut boot: ResMut<InstanceBoot>) {
         if let SessionEvent::RaidGroupOnly { delay_ms, reason } = ev {
-            boot.apply(delay_ms, reason, std::time::Instant::now());
+            boot.apply(delay_ms, reason, bevy::platform::time::Instant::now());
         }
     }
 
@@ -1012,7 +1014,7 @@ mod net {
     ) {
         if let SessionEvent::AreaSpiritHealerTime { healer, ms } = ev {
             let changes = scan.run(&mut spirit);
-            spirit.on_time(healer, ms, std::time::Instant::now());
+            spirit.on_time(healer, ms, bevy::platform::time::Instant::now());
             if changes.is_empty() {
                 return;
             }

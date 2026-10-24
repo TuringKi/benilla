@@ -14,6 +14,10 @@ use crate::view::WorldCamera;
 
 use super::{AnimParked, RigFrame, RigPose};
 
+#[cfg(not(target_os = "macos"))]
+#[path = "compose_scratch.rs"]
+mod compose_scratch;
+
 /// The pose post-pass window: the locals writers after the evaluator, before the model compose.
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PosePost;
@@ -139,6 +143,7 @@ pub fn finalize_rig_worlds(
     frames: Query<&RigFrame>,
     ibps: Res<Assets<SkinnedMeshInverseBindposes>>,
     mut palettes: ResMut<RigPalettes>,
+    #[cfg(not(target_os = "macos"))] mut scratch: Local<compose_scratch::RigWorldScratch>,
 ) {
     let cam_basis = cam
         .single()
@@ -161,7 +166,7 @@ pub fn finalize_rig_worlds(
     if refresh.is_empty() {
         return;
     }
-    let cost_t0 = crate::rig_palette::rig_cost_enabled().then(std::time::Instant::now);
+    let cost_t0 = crate::rig_palette::rig_cost_enabled().then(bevy::platform::time::Instant::now);
     let mut globals = worlds_params.p1();
     // As in the entity pass, the re-walk does not enter a nested rig with its own billboard output.
     let fx_roots: bevy::platform::collections::HashSet<Entity> =
@@ -184,7 +189,10 @@ pub fn finalize_rig_worlds(
             // (~1 mm) per matmul, fresh each frame, shimmers. `WOW_NO_RIG_REBASE=1` turns it off.
             let origin = crate::rig_palette::rebase_origin(root_g.translation());
             let root_rel = crate::rig_palette::rebase_global(root_g, origin);
+            #[cfg(target_os = "macos")]
             let (worlds, touched) = rig_worlds(rig, root_rel, cam_basis);
+            #[cfg(not(target_os = "macos"))]
+            let (worlds, touched) = scratch.compose(rig, root_rel, cam_basis);
             if let Some(skin) = skin {
                 if let Some(ibp) = ibps.get(&skin.ibp) {
                     palettes.write_rig_worlds(skin, &worlds, ibp, origin);

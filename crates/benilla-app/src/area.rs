@@ -89,6 +89,35 @@ struct ZoneSignal {
     indoor: bool,
 }
 
+/// The resolved zone texts as a resource: what [`feed_zone_events`] hands the VM, for a host-side
+/// reader that is not Lua (the web bridge, `crate::webbridge`). Written only when a resolve
+/// publishes, so it holds the last published state and `is_changed` marks a real transition.
+#[derive(Resource, Default, Clone, PartialEq, Debug)]
+pub(crate) struct ZoneInfo {
+    /// The zone row's id (the leaf's single-hop parent, or the leaf itself).
+    pub(crate) zone_id: u32,
+    /// `GetZoneText()` — the zone name, or the whole-WMO override indoors.
+    pub(crate) zone_text: String,
+    /// `GetRealZoneText()` — the zone row's own name, never overridden.
+    pub(crate) real_zone_text: String,
+    /// `GetSubZoneText()`.
+    pub(crate) subzone_text: String,
+    /// `GetMinimapZoneText()` — subzone, else zone.
+    pub(crate) minimap_text: String,
+    pub(crate) indoor: bool,
+    /// `GetZonePVPInfo()`'s type: `friendly` / `hostile` / `contested`, or empty on structural
+    /// failure (the reference's nil).
+    pub(crate) pvp_type: &'static str,
+    /// …and its faction name (`FactionGroup.dbc`), empty when unowned.
+    pub(crate) pvp_faction: String,
+    pub(crate) arena: bool,
+}
+
+/// The set [`feed_zone_events`] runs in — after the VM tick and the leaf authority (see the
+/// plugin); named so a reader of [`ZoneInfo`] can order itself after the write.
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct ZoneFeed;
+
 /// The event election of `0x494780`.
 fn elect_event(cache: &ZoneCache, next: &ZoneSignal) -> Option<&'static str> {
     if cache.zone_id != Some(next.zone_id) {
@@ -118,6 +147,7 @@ fn feed_zone_events(
     factions: Option<Res<Factions>>,
     realm_pvp: Option<Res<RealmPvp>>,
     mut cache: Local<crate::ui_script::VmMemo<ZoneCache>>,
+    mut info: ResMut<ZoneInfo>,
 ) {
     hosted_vm.run(|script| {
         let Some(script) = script else {
@@ -224,6 +254,31 @@ fn feed_zone_events(
             is_arena: leaf_row.flags & 0x80 != 0,
         });
 
+        // Publish the bridge view after updating the VM. The current client computes PvP
+        // against the live player at the call, so share that decision rather than duplicating it.
+        let (pvp, faction) = script
+            .eval::<(Option<String>, Option<String>)>("return GetZonePVPInfo()")
+            .unwrap_or_default();
+        let pvp_type = match pvp.as_deref() {
+            Some("friendly") => "friendly",
+            Some("hostile") => "hostile",
+            Some("contested") => "contested",
+            Some("sanctuary") => "sanctuary",
+            Some("arena") => "arena",
+            _ => "",
+        };
+        info.set_if_neq(ZoneInfo {
+            zone_id: signal.zone_id,
+            zone_text: signal.zone_text.clone(),
+            real_zone_text: areas.0.name(zone).unwrap_or_default().to_string(),
+            subzone_text: signal.subzone_text.clone(),
+            minimap_text: minimap_text.clone(),
+            indoor: signal.indoor,
+            pvp_type,
+            pvp_faction: faction.unwrap_or_default(),
+            arena: leaf_row.flags & 0x80 != 0,
+        });
+
         if let Some(event) = event {
             script.fire_event(event, vec![]);
             debug!(
@@ -294,7 +349,8 @@ pub(crate) struct AreaPlugin;
 
 impl Plugin for AreaPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<RealmPvp>()
+        app.init_resource::<ZoneInfo>()
+            .init_resource::<RealmPvp>()
             .add_systems(Startup, load_area_table.after(AssetSet::Open))
             .add_systems(
                 OnEnter(crate::client_state::ClientState::InWorld),
@@ -307,6 +363,7 @@ impl Plugin for AreaPlugin {
                 // spurious splash. After the unit feed too, by the sets: the commit's handlers read
                 // our template as the frame's packets left it.
                 feed_zone_events
+                    .in_set(ZoneFeed)
                     .after(crate::ui_script::UiInput)
                     .after(benilla_world::terrain_stream::AreaAuthoritySet),
             );

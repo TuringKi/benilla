@@ -86,6 +86,8 @@ struct Frame {
 }
 
 // A call writes one cache line of frame.
+// wenilla: on 64-bit pointers only; wasm32's five pointers are half as wide.
+#[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<Frame>() == 64);
 
 impl Frame {

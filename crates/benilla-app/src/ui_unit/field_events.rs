@@ -1137,7 +1137,7 @@ mod tests {
             "the interface is up: the drain fires it"
         );
         // An entry load pending is the interface not up yet.
-        app.insert_resource(crate::ui_script::PendingEntryUiLoad);
+        app.insert_resource(crate::ui_script::PendingEntryUiLoad::default());
         assert!(heard(&mut app, FieldNotice::Player { id: 406 }).is_empty());
     }
 

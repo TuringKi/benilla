@@ -86,7 +86,7 @@ fn icon_source(
     data: Option<std::path::PathBuf>,
 ) -> Box<dyn Fn() -> Vec<String>> {
     Box::new(move || {
-        let start = std::time::Instant::now();
+        let start = bevy::platform::time::Instant::now();
         let icons = match &chain {
             Some(chain) => {
                 benilla_formats::load_macro_icons(Some(&chain.lock_recover()), data.as_deref())
@@ -136,7 +136,7 @@ fn load_macros(
                     per_character: bool|
          -> Vec<benilla_ui::script::MacroView> {
             let Some(path) = path else { return Vec::new() };
-            match std::fs::read_to_string(path) {
+            match crate::local_state::read_to_string(path) {
                 Ok(text) => store::parse(&text, per_character),
                 // Absent is the first run, not a failure.
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),

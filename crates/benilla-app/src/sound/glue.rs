@@ -5,10 +5,16 @@
 //!   load and fades over 3.0 s once the load drains, still behind the loading screen.
 //! - Credits music: `PlayCreditsMusic` (`0x46cef0` → `0x45b000`) swaps the theme for the seven
 //!   city intro-moment tracks, played in turn ([`CREDITS_TRACKS`]).
+//!
+//! wenilla: on wasm32 a stream's file is fetched and decoded by the browser (`super::web_load`, the
+//! zone soundscape's carry) and starts on the frame it lands ([`land_glue_loads`]); a synchronous
+//! read of a multi-megabyte track froze the login screen. Native opens it inline.
 
 use bevy::prelude::*;
 
 use crate::client_state::ClientState;
+#[cfg(target_arch = "wasm32")]
+use benilla_assets::LockRecover;
 use benilla_assets::WorldAssets;
 
 use super::kit::SoundCategory;
@@ -98,6 +104,13 @@ struct GlueMusic {
     /// The credits playlist (`[0xb06098]`), a stream of its own beside the theme's.
     credits: CreditsPlaylist,
     credits_handle: Option<GlueStream>,
+    /// wasm32: the theme's load in flight, started where native opens the stream inline. Dropped
+    /// (which aborts the fetch) by whatever would have stopped the stream it becomes.
+    #[cfg(target_arch = "wasm32")]
+    pending_theme: Option<super::web_load::Pending>,
+    /// wasm32: the playlist track's load in flight, as [`Self::pending_theme`].
+    #[cfg(target_arch = "wasm32")]
+    pending_credits: Option<super::web_load::Pending>,
 }
 
 type GlueStream = mixer::StreamingSoundHandle<kira::sound::FromFileError>;
@@ -111,12 +124,29 @@ impl Default for GlueMusic {
             fading: false,
             credits: CreditsPlaylist::default(),
             credits_handle: None,
+            #[cfg(target_arch = "wasm32")]
+            pending_theme: None,
+            #[cfg(target_arch = "wasm32")]
+            pending_credits: None,
         }
+    }
+}
+
+impl GlueMusic {
+    /// A theme is streaming, or (wasm32) on its way, so a `PlayGlueMusic` of the same file plays
+    /// on rather than starting it again.
+    fn theme_live(&self) -> bool {
+        #[cfg(target_arch = "wasm32")]
+        if self.pending_theme.is_some() {
+            return true;
+        }
+        self.handle.is_some() && !self.fading
     }
 }
 
 /// Open `file` off the loose files or the chain as a stream at `amp` (the category's slider
 /// already multiplied in).
+#[cfg(not(target_arch = "wasm32"))]
 fn open_stream(
     out: &mut SoundOutput,
     assets: Option<&WorldAssets>,
@@ -137,6 +167,16 @@ fn open_stream(
             return None;
         }
     };
+    play_stream(mixer_ref, data, file, amp)
+}
+
+/// Play decoded `data` for `file` at `amp`: [`open_stream`]'s tail, and the wasm32 lander's.
+fn play_stream(
+    mixer_ref: &mut mixer::Mixer,
+    data: mixer::StreamingSoundData<kira::sound::FromFileError>,
+    file: &str,
+    amp: f32,
+) -> Option<GlueStream> {
     match mixer_ref.play_stream(data.volume(mixer::amp_to_db(amp))) {
         Ok(h) => {
             info!("glue music: {file}");
@@ -149,6 +189,26 @@ fn open_stream(
     }
 }
 
+/// wasm32: begin the browser-side load of `file`, `None` when the chain has no URL for it (the
+/// silence native gives for a missing file). The lock is held to build the URL and dropped before
+/// the request starts.
+#[cfg(target_arch = "wasm32")]
+fn begin_load(assets: Option<&WorldAssets>, file: &str) -> Option<super::web_load::Pending> {
+    let url = assets?.chain.lock_recover().url_for_name(file);
+    let Some(url) = url else {
+        debug!("glue music: {file} — not in the patch chain");
+        return None;
+    };
+    Some(super::web_load::begin(
+        url,
+        file.to_string(),
+        0,
+        1.0,
+        0,
+        false,
+    ))
+}
+
 /// Open `file` off the chain as the held theme at the Music slider times 0.8.
 fn open_glue_music(
     music: &mut GlueMusic,
@@ -157,17 +217,33 @@ fn open_glue_music(
     config: &SoundConfig,
     file: &str,
 ) {
-    let amp = config.category_amp(SoundCategory::Music) * GLUE_MUSIC_VOLUME;
-    if let Some(h) = open_stream(out, assets, file, amp) {
-        music.handle = Some(h);
-        music.fading = false;
-        music.watch.reset();
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (out, config);
+        music.pending_theme = begin_load(assets, file);
     }
+    #[cfg(not(target_arch = "wasm32"))]
+    let amp = config.category_amp(SoundCategory::Music) * GLUE_MUSIC_VOLUME;
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(h) = open_stream(out, assets, file, amp) {
+        adopt_theme(music, h);
+    }
+}
+
+/// The theme's stream is up: hold it, at full volume, under a fresh watch.
+fn adopt_theme(music: &mut GlueMusic, h: GlueStream) {
+    music.handle = Some(h);
+    music.fading = false;
+    music.watch.reset();
 }
 
 /// `0x45adb0(0)`: the playlist's stream fades over 1.0 s and the playlist is off. The handle
 /// drops with its ramp armed, so the stream finishes fading on the backend.
 fn stop_credits(music: &mut GlueMusic) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        music.pending_credits = None;
+    }
     if let Some(mut h) = music.credits_handle.take() {
         h.stop(mixer::fade(CREDITS_FADE_OUT_MS));
     }
@@ -183,15 +259,31 @@ fn open_credits_track(
     config: &SoundConfig,
     file: &str,
 ) {
-    let amp = config.category_amp(SoundCategory::Music) * CREDITS_VOLUME;
-    match open_stream(out, assets, file, amp) {
-        Some(h) => music.credits_handle = Some(h),
-        None => music.credits.stop(),
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (out, config);
+        music.pending_credits = begin_load(assets, file);
+        if music.pending_credits.is_none() {
+            music.credits.stop();
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let amp = config.category_amp(SoundCategory::Music) * CREDITS_VOLUME;
+        match open_stream(out, assets, file, amp) {
+            Some(h) => music.credits_handle = Some(h),
+            None => music.credits.stop(),
+        }
     }
 }
 
 /// Stop the held theme over `fade_ms`; the handle drops once the watch sees it stopped.
 fn fade_glue_music(music: &mut GlueMusic, fade_ms: u64) {
+    // A theme still on its way never starts: the stop is for it too.
+    #[cfg(target_arch = "wasm32")]
+    {
+        music.pending_theme = None;
+    }
     if let Some(h) = music.handle.as_mut() {
         h.stop(mixer::fade(fade_ms));
         music.fading = true;
@@ -236,7 +328,7 @@ fn drive_glue_music_requests(
             GlueMusicRequest::Play(file) => {
                 // `0x45aeb0` stops the playlist before anything else (`0x45aeb5`).
                 stop_credits(&mut music);
-                let streaming = music.handle.is_some() && !music.fading;
+                let streaming = music.theme_live();
                 match play_action(file, &music.track, streaming) {
                     PlayAction::Nothing => {}
                     PlayAction::Restart => {
@@ -281,6 +373,10 @@ fn hand_off_glue_music(
     let fell = std::mem::replace(&mut *was_covered, covered) && !covered;
     if !fell || *state.get() != ClientState::InWorld {
         return;
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        music.pending_theme = None;
     }
     if let Some(h) = music.handle.as_mut() {
         info!("glue music: the world's load drained — {GLUE_MUSIC_FADE_OUT_MS} ms fade");
@@ -351,6 +447,55 @@ fn watch_credits(
     }
 }
 
+/// wasm32: start the streams whose loads the browser has finished, at the slider as it is now. A
+/// theme that failed is the silence native gives; a playlist track that failed ends the playlist
+/// (`0x45ae33`).
+#[cfg(target_arch = "wasm32")]
+fn land_glue_loads(
+    mut music: NonSendMut<GlueMusic>,
+    mut out: NonSendMut<SoundOutput>,
+    config: Res<SoundConfig>,
+) {
+    let music = &mut *music;
+    if let Some(landed) = music.pending_theme.as_mut().and_then(|p| p.take()) {
+        let path = music.pending_theme.take().map(|p| p.path.clone()).unwrap_or_default();
+        match landed {
+            Ok(data) => {
+                let amp = config.category_amp(SoundCategory::Music) * GLUE_MUSIC_VOLUME;
+                let data = mixer::StreamingSoundData::from_static(data);
+                if let Some(h) = out
+                    .mixer
+                    .as_mut()
+                    .and_then(|m| play_stream(m, data, &path, amp))
+                {
+                    adopt_theme(music, h);
+                }
+            }
+            Err(e) => debug!("glue music: {e}"),
+        }
+    }
+    if let Some(landed) = music.pending_credits.as_mut().and_then(|p| p.take()) {
+        let path = music.pending_credits.take().map(|p| p.path.clone()).unwrap_or_default();
+        let amp = config.category_amp(SoundCategory::Music) * CREDITS_VOLUME;
+        let started = match landed {
+            Ok(data) => {
+                let data = mixer::StreamingSoundData::from_static(data);
+                out.mixer
+                    .as_mut()
+                    .and_then(|m| play_stream(m, data, &path, amp))
+            }
+            Err(e) => {
+                debug!("glue music: {e}");
+                None
+            }
+        };
+        match started {
+            Some(h) => music.credits_handle = Some(h),
+            None => music.credits.stop(),
+        }
+    }
+}
+
 /// Report the glue theme's voice and the playlist's into the global budget; the theme plays into
 /// `InWorld` too.
 fn report_stream_voices(music: NonSend<GlueMusic>, mut out: NonSendMut<super::SoundOutput>) {
@@ -378,6 +523,13 @@ pub(super) fn plugin(app: &mut App) {
                 report_stream_voices,
             ),
         );
+    #[cfg(target_arch = "wasm32")]
+    app.add_systems(
+        Update,
+        land_glue_loads
+            .after(drive_glue_music_requests)
+            .before(watch_glue_music),
+    );
 }
 
 #[cfg(test)]

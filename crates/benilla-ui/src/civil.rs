@@ -105,6 +105,10 @@ pub fn zone_name(isdst: bool) -> Vec<u8> {
     zone::name(isdst)
 }
 
+#[cfg(target_arch = "wasm32")]
+#[path = "civil/web_zone.rs"]
+mod zone;
+
 /// The platform's half: the C runtime's zone, read afresh (`tzset`) at each call so a change of
 /// `TZ` reaches it.
 #[cfg(unix)]
@@ -225,8 +229,8 @@ mod zone {
 
 /// Wall-clock seconds since the Unix epoch; a clock set before 1970 reads 0 rather than raising.
 pub fn unix_seconds() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    web_time::SystemTime::now()
+        .duration_since(web_time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0)
 }

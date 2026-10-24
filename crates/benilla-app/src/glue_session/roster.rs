@@ -199,12 +199,13 @@ pub(super) fn apply_roster_policy(
         // this one-shot fast path cannot wait for.
         roster.env_char = match rig.as_deref() {
             Some(crate::run_mode::RigCharacter(name)) => {
-                if let Ok(ignored) = std::env::var("WOW_CHAR") {
+                if let Some(ignored) = crate::webenv::var("WOW_CHAR") {
                     warn!("char select: WOW_RIG names {name} — ignoring WOW_CHAR={ignored}");
                 }
                 None
             }
-            None => std::env::var("WOW_CHAR").ok(),
+            // Through `webenv`: a page's `?char=` (or the host's `__wenilla_env`).
+            None => crate::webenv::var("WOW_CHAR"),
         };
     }
     for msg in msgs.read() {
@@ -385,7 +386,7 @@ mod tests {
     /// ([`send_pick`]); with no tables to answer, the lookup is a miss and the position stands.
     #[test]
     fn a_re_answered_pick_of_a_new_character_looks_up_its_eye() {
-        let (tx, rx) = crossbeam_channel::unbounded();
+        let (tx, rx) = async_channel::unbounded();
         let mut new = test_character(7, "Seven");
         new.race = 3;
         new.new_character = true;

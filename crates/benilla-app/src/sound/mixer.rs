@@ -14,14 +14,38 @@ use bevy::prelude::*;
 use kira::effect::reverb::{ReverbBuilder, ReverbHandle};
 use kira::effect::volume_control::{VolumeControlBuilder, VolumeControlHandle};
 use kira::listener::ListenerHandle;
-use kira::sound::streaming::StreamingSoundData;
+// kira drops its whole streaming module on wasm32 (no decode threads there — `sound.rs`'s own
+// `#[cfg(not(target_arch = "wasm32"))]` on `pub mod streaming`), so the type only exists to
+// import on native. The wasm32 stand-ins live just below the `pub(crate) use` block they replace.
+// `pub(crate)` so the name resolves as `mixer::StreamingSoundData` on BOTH targets: wasm's
+// stand-in below is a `pub(crate) struct`, and `zone::finish_music` — the one completion both
+// load paths land in — has to be able to spell the type without a `#[cfg]` of its own.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) use kira::sound::streaming::StreamingSoundData;
 use kira::sound::FromFileError;
 use kira::track::{SendTrackBuilder, SendTrackHandle, SpatialTrackBuilder};
 use kira::{AudioManager, AudioManagerSettings, Decibels, Mix, Tween};
 
 use super::limiter;
 use super::meter::{self, LevelReading, MixLevel};
-use super::output::{self, Event, OutputBackend, OutputSettings, Window};
+use super::output::Window;
+#[cfg(not(target_arch = "wasm32"))]
+use super::output::{self, Event, OutputBackend, OutputSettings};
+#[cfg(target_arch = "wasm32")]
+use super::web_backend::{WebBackend, WebBackendSettings};
+#[cfg(target_arch = "wasm32")]
+use cpal::traits::{DeviceTrait, HostTrait};
+
+/// **The mixer's kira backend.** Upstream's owned device layer (decision 1857) now reaches every
+/// native target — CoreAudio on macOS, cpal elsewhere (1920) — so the mixer runs on it there, and
+/// wenilla's Linux build gets the ring, the render thread and the meters like any other. The
+/// browser is the one target it cannot reach: no threads for that render loop, and no clock for
+/// its meters (`std::time::Instant` panics on wasm32). wasm32 therefore runs kira on
+/// [`WebBackend`], Web Audio through cpal. This alias is that seam, and the only one.
+#[cfg(not(target_arch = "wasm32"))]
+type MixBackend = OutputBackend;
+#[cfg(target_arch = "wasm32")]
+type MixBackend = WebBackend;
 
 /// The output backend's per-window meters, re-exported for the report in `sound::poll_mix_health`.
 pub(super) type OutputWindow = Window;
@@ -31,8 +55,65 @@ pub(crate) use benilla_formats::SoundProvider;
 // Handles crossing the seam. Dropping a sound handle does not stop the sound; dropping a spatial
 // track handle removes the track once its sounds finish, so a fade-then-drop still fades.
 pub(crate) use kira::sound::static_sound::{StaticSoundData, StaticSoundHandle};
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) use kira::sound::streaming::StreamingSoundHandle;
 pub(crate) use kira::track::SpatialTrackHandle;
+
+/// wasm32's stand-in for [`StreamingSoundData`]/[`StreamingSoundHandle`]: kira has no decode
+/// thread to stream on there, so every "streaming" sound (music/ambience) is decoded fully up
+/// front as a [`StaticSoundData`] instead (`stream_from_bytes`'s wasm arm, below). These wrap a
+/// static sound behind the streaming names so `glue.rs`/`zone.rs` — and every doc comment in this
+/// module — read the same on both targets; `Error` stays a phantom parameter purely so the call
+/// sites that spell out `StreamingSoundHandle<FromFileError>` don't need a `#[cfg]` of their own.
+#[cfg(target_arch = "wasm32")]
+pub(crate) struct StreamingSoundData<Error>(StaticSoundData, std::marker::PhantomData<Error>);
+
+#[cfg(target_arch = "wasm32")]
+impl<Error> StreamingSoundData<Error> {
+    pub(crate) fn volume(self, volume: impl Into<kira::Value<Decibels>>) -> Self {
+        Self(self.0.volume(volume), self.1)
+    }
+
+    /// Wear the streaming name over PCM that is already decoded. [`stream_from_bytes`] needs
+    /// `from_cursor` because it starts from compressed bytes; [`super::web_load`] hands the decode
+    /// to the browser and arrives with the samples, so it needs this instead.
+    pub(crate) fn from_static(data: StaticSoundData) -> Self {
+        Self(data, std::marker::PhantomData)
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) struct StreamingSoundHandle<Error>(StaticSoundHandle, std::marker::PhantomData<Error>);
+
+#[cfg(target_arch = "wasm32")]
+impl<Error> StreamingSoundHandle<Error> {
+    /// The [`StaticSoundHandle`] methods this module and its callers actually use — the
+    /// full control surface (`pause`/`seek_to`/`set_loop_region`/…) is identical between kira's
+    /// static and streaming handles (both expand the same `handle_param_setters!` macro), so
+    /// forwarding grows here the moment a caller needs more.
+    pub(crate) fn set_volume(&mut self, volume: impl Into<kira::Value<Decibels>>, tween: Tween) {
+        self.0.set_volume(volume, tween);
+    }
+    pub(crate) fn state(&self) -> kira::sound::PlaybackState {
+        self.0.state()
+    }
+    pub(crate) fn position(&self) -> f64 {
+        self.0.position()
+    }
+    pub(crate) fn stop(&mut self, tween: Tween) {
+        self.0.stop(tween);
+    }
+    pub(crate) fn pause(&mut self, tween: Tween) {
+        self.0.pause(tween);
+    }
+    pub(crate) fn resume(&mut self, tween: Tween) {
+        self.0.resume(tween);
+    }
+    /// A static sound has no decoder to fail mid-play, so there is never an error to report.
+    pub(crate) fn pop_error(&mut self) -> Option<Error> {
+        None
+    }
+}
 
 /// A zero-duration tween, for a change that is a step (a reverb preset switch is instant,
 /// `0x45a720`); the per-frame volume feed uses [`glide`], since a step there clicks.
@@ -81,7 +162,7 @@ pub(crate) fn amp_to_db(amp: f32) -> Decibels {
 /// The open audio device and its listener. No master filter: the reference applies no DSP beyond
 /// FMOD's reverb (no `FSOUND_FX_*` import).
 pub(crate) struct Mixer {
-    manager: AudioManager<OutputBackend>,
+    manager: AudioManager<MixBackend>,
     listener: ListenerHandle,
     /// Rolling mix-health counters ([`Mixer::poll_health`]).
     health: MixHealth,
@@ -109,11 +190,16 @@ impl Mixer {
     /// Open the default audio device; without one the caller runs silent.
     pub(crate) fn new(probe_dir: Option<&Path>) -> Result<Self> {
         // The tap's WAV header and the limiter's delay line are sized at build time.
-        let sample_rate = output::probe_sample_rate();
-        let backend_settings = OutputSettings {
-            mix_ahead_ms: mix_ahead_ms(),
-            device_buffer_frames: io_buffer_frames(),
-        };
+        #[cfg(not(target_arch = "wasm32"))]
+        let (backend_settings, sample_rate) = (
+            OutputSettings {
+                mix_ahead_ms: mix_ahead_ms(),
+                device_buffer_frames: io_buffer_frames(),
+            },
+            output::probe_sample_rate(),
+        );
+        #[cfg(target_arch = "wasm32")]
+        let (backend_settings, sample_rate) = backend_settings();
         let level = Arc::new(MixLevel::default());
         let limiter_on = Arc::new(AtomicBool::new(true));
         let MainChain {
@@ -122,7 +208,7 @@ impl Mixer {
             output,
             audio_pos,
         } = main_track(&level, &limiter_on, sample_rate, probe_dir);
-        let settings = AudioManagerSettings::<OutputBackend> {
+        let settings = AudioManagerSettings::<MixBackend> {
             backend_settings,
             main_track_builder,
             capacities: kira::Capacities {
@@ -131,8 +217,11 @@ impl Mixer {
             },
             ..Default::default()
         };
-        let mut manager = AudioManager::<OutputBackend>::new(settings)
+        let mut manager = AudioManager::<MixBackend>::new(settings)
             .map_err(|e| anyhow::anyhow!("audio device init: {e:#}"))?;
+        // The owned backend negotiates its own rate and reports it; [`WebBackend`] takes the one
+        // `backend_settings` probed, so on wasm32 that probe is already the answer.
+        #[cfg(not(target_arch = "wasm32"))]
         let sample_rate = Some(manager.backend_mut().sample_rate());
         // Wet-only, silent until a zone preset raises it.
         let mut send_builder = SendTrackBuilder::new().volume(Decibels::SILENCE);
@@ -311,6 +400,7 @@ impl Mixer {
     }
 
     /// Decode-stream a long sound (music, an ambience bed) on the main track.
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn play_stream(
         &mut self,
         data: StreamingSoundData<FromFileError>,
@@ -318,6 +408,20 @@ impl Mixer {
         self.manager
             .play(data)
             .map_err(|e| anyhow::anyhow!("play stream: {e}"))
+    }
+
+    /// wasm32 twin: `data` is already a fully-decoded [`StaticSoundData`] wearing the streaming
+    /// name (see [`StreamingSoundData`]'s doc) — play it as one and re-wrap the handle.
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn play_stream(
+        &mut self,
+        data: StreamingSoundData<FromFileError>,
+    ) -> Result<StreamingSoundHandle<FromFileError>> {
+        let handle = self
+            .manager
+            .play(data.0)
+            .map_err(|e| anyhow::anyhow!("play stream: {e}"))?;
+        Ok(StreamingSoundHandle(handle, std::marker::PhantomData))
     }
 }
 
@@ -366,8 +470,49 @@ struct MainChain {
     audio_pos: Option<Arc<AtomicU64>>,
 }
 
+/// The device IO buffer [`WebBackend`] asks for on wasm32, in frames (decision 1026).
+/// 2048 at 48 kHz is ~43 ms — long enough that a world-entry compile burst does not starve the
+/// callback.
+#[cfg(target_arch = "wasm32")]
+const TARGET_BUFFER_FRAMES: u32 = 2048;
+
+/// Build [`WebBackend`]'s settings: the default device's config with our explicit buffer size,
+/// and the negotiated sample rate (the mix tap's WAV header must match the renderer); `None` when
+/// the device or config could not be probed, which opens the default config. [`Mixer::new`]'s
+/// caller already tolerates no device. wasm32 only — every native target builds
+/// [`OutputSettings`] for the owned backend instead.
+#[cfg(target_arch = "wasm32")]
+fn backend_settings() -> (WebBackendSettings, Option<u32>) {
+    let fallback = None;
+    let Some(device) = cpal::default_host().default_output_device() else {
+        return (fallback, None);
+    };
+    let Ok(supported) = device.default_output_config() else {
+        return (fallback, None);
+    };
+    // Clamp into what the device will actually accept; `Unknown` means cpal can't tell us the
+    // range, and asking for a size outside it fails the stream build — so leave those alone.
+    let cpal::SupportedBufferSize::Range { min, max } = supported.buffer_size() else {
+        info!("audio: device reports no buffer-size range — leaving it to the driver");
+        let rate = supported.config().sample_rate;
+        return (fallback, Some(rate));
+    };
+    let frames = TARGET_BUFFER_FRAMES.clamp(*min, *max);
+    let mut config = supported.config();
+    config.buffer_size = cpal::BufferSize::Fixed(frames);
+    info!(
+        "audio: {} Hz, {} ch, buffer {frames} frames (~{:.1} ms)",
+        config.sample_rate,
+        config.channels,
+        f64::from(frames) / f64::from(config.sample_rate) * 1000.0,
+    );
+    let rate = config.sample_rate;
+    (Some(config), Some(rate))
+}
+
 /// `SoundBufferSize`, the mix-ahead in ms, read once from the stored config at sound init, as
 /// the reference reads it.
+#[cfg(not(target_arch = "wasm32"))]
 fn mix_ahead_ms() -> u32 {
     crate::cvars::boot_cvar("SoundBufferSize")
         .and_then(|v| v.trim().parse::<f64>().ok())
@@ -378,6 +523,7 @@ fn mix_ahead_ms() -> u32 {
 }
 
 /// `$WOW_IO_BUFFER`: the device IO buffer in frames.
+#[cfg(not(target_arch = "wasm32"))]
 fn io_buffer_frames() -> u32 {
     std::env::var("WOW_IO_BUFFER")
         .ok()
@@ -405,35 +551,49 @@ pub(crate) struct MixHealth {
 impl Mixer {
     /// Service the output backend and fold its window into the health counters, every frame.
     pub(crate) fn poll_health(&mut self) -> MixHealth {
-        let backend = self.manager.backend_mut();
-        let (window, events) = backend.service();
-        self.sample_rate = Some(backend.sample_rate());
-        self.health.stream_errors = backend.stream_errors();
-        for event in events {
-            match event {
-                Event::Opened {
-                    device,
-                    sample_rate,
-                    buffer_frames,
-                    mix_ahead_ms,
-                    realtime_latency_frames,
-                } => info!(
-                    "audio: {device} — {sample_rate} Hz, IO buffer {buffer_frames} frames \
-                     (~{:.1} ms), mix-ahead {mix_ahead_ms} ms, device latency ~{:.1} ms",
-                    f64::from(buffer_frames) / f64::from(sample_rate) * 1000.0,
-                    f64::from(realtime_latency_frames) / f64::from(sample_rate) * 1000.0,
-                ),
-                Event::Lost(why) => warn!("audio: output stream dropped — {why}; reopening"),
-                Event::OpenFailed(what) => warn!("audio: output device refused — {what}; retrying"),
-                Event::Dead(what) => error!("audio: output is gone for good — {what}"),
+        // The owned device layer reports all of this itself; on wasm32 (`MixBackend`) there is
+        // no such backend to ask, so that arm reports nothing at all.
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let backend = self.manager.backend_mut();
+            let (window, events) = backend.service();
+            self.sample_rate = Some(backend.sample_rate());
+            self.health.stream_errors = backend.stream_errors();
+            for event in events {
+                match event {
+                    Event::Opened {
+                        device,
+                        sample_rate,
+                        buffer_frames,
+                        mix_ahead_ms,
+                        realtime_latency_frames,
+                    } => info!(
+                        "audio: {device} — {sample_rate} Hz, IO buffer {buffer_frames} frames \
+                         (~{:.1} ms), mix-ahead {mix_ahead_ms} ms, device latency ~{:.1} ms",
+                        f64::from(buffer_frames) / f64::from(sample_rate) * 1000.0,
+                        f64::from(realtime_latency_frames) / f64::from(sample_rate) * 1000.0,
+                    ),
+                    Event::Lost(why) => warn!("audio: output stream dropped — {why}; reopening"),
+                    Event::OpenFailed(what) => {
+                        warn!("audio: output device refused — {what}; retrying")
+                    }
+                    Event::Dead(what) => error!("audio: output is gone for good — {what}"),
+                }
             }
+            if window.render_chunks > 0 && window.chunk_ms > 0.0 {
+                self.health.load = (window.render_wall_max_ms / window.chunk_ms) as f32;
+                self.health.peak_load = self.health.peak_load.max(self.health.load);
+            }
+            self.health.overruns += window.underruns;
+            self.window.merge(window);
         }
-        if window.render_chunks > 0 && window.chunk_ms > 0.0 {
-            self.health.load = (window.render_wall_max_ms / window.chunk_ms) as f32;
-            self.health.peak_load = self.health.peak_load.max(self.health.load);
+        #[cfg(target_arch = "wasm32")]
+        {
+            // kira's wasm32 `CpalBackend` has no `pop_cpu_usage`/`pop_error` — its cpal backend there
+            // is Web Audio under the hood and doesn't expose the diagnostics API those read. Rather
+            // than fabricate a load/error count kira never gives it, the meter just reports nothing
+            // on web (`health` starts and stays at its `Default`).
         }
-        self.health.overruns += window.underruns;
-        self.window.merge(window);
         self.health
     }
 
@@ -487,13 +647,25 @@ pub(crate) fn sfx_from_bytes(bytes: Vec<u8>) -> Result<StaticSoundData> {
 }
 
 /// Wrap compressed audio bytes for decode-streaming ([`stream_from_source`]).
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn stream_from_bytes(bytes: Vec<u8>) -> Result<StreamingSoundData<FromFileError>> {
     let len = bytes.len() as u64;
     stream_from_source(std::io::Cursor::new(bytes), len)
 }
 
+/// wasm32 twin: no decode thread exists to promote (see [`PromotingSource`]'s doc — the whole
+/// reason it exists), so the compressed bytes are decoded to PCM synchronously, up front, on
+/// whatever thread calls this (the main thread, same as [`sfx_from_bytes`] already does).
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn stream_from_bytes(bytes: Vec<u8>) -> Result<StreamingSoundData<FromFileError>> {
+    StaticSoundData::from_cursor(std::io::Cursor::new(bytes))
+        .map(|data| StreamingSoundData(data, std::marker::PhantomData))
+        .context("opening stream")
+}
+
 /// Open a decode-stream over `len` bytes of `source`: its header is read here, on the calling
 /// thread, and the rest on kira's decode thread as it plays, behind [`PromotingSource`].
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn stream_from_source<R>(
     source: R,
     len: u64,
@@ -515,6 +687,7 @@ where
 /// A stream's bytes, whose first read on a thread once the stream is built promotes that thread
 /// to user-interactive QoS: kira's decode thread starts at default QoS, below the world-entry
 /// burst, and a starved decoder crackles without tripping any [`MixHealth`] meter.
+#[cfg(not(target_arch = "wasm32"))]
 struct PromotingSource<R> {
     inner: R,
     len: u64,
@@ -522,6 +695,7 @@ struct PromotingSource<R> {
     armed: Arc<AtomicBool>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<R> PromotingSource<R> {
     fn promote(&self) {
         if self.armed.load(Ordering::Relaxed) {
@@ -531,6 +705,7 @@ impl<R> PromotingSource<R> {
 }
 
 /// Once-per-thread promotion latch for [`PromotingSource`].
+#[cfg(not(target_arch = "wasm32"))]
 fn promote_decode_thread() {
     std::thread_local! {
         static PROMOTED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
@@ -549,6 +724,7 @@ fn promote_decode_thread() {
     });
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<R: std::io::Read> std::io::Read for PromotingSource<R> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         self.promote();
@@ -556,6 +732,7 @@ impl<R: std::io::Read> std::io::Read for PromotingSource<R> {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<R: std::io::Seek> std::io::Seek for PromotingSource<R> {
     fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
         self.promote();
@@ -563,6 +740,7 @@ impl<R: std::io::Seek> std::io::Seek for PromotingSource<R> {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<R> symphonia::core::io::MediaSource for PromotingSource<R>
 where
     R: std::io::Read + std::io::Seek + Send + Sync,
@@ -601,7 +779,7 @@ enum Phase {
     Idle,
     /// Audible, the position not yet moved off `pos`: the spin-up, not counted.
     Starting {
-        since: std::time::Instant,
+        since: bevy::platform::time::Instant,
         pos: f64,
         warned: bool,
     },
@@ -609,7 +787,7 @@ enum Phase {
     /// the reported span are one interval.
     Running {
         last_pos: f64,
-        window_start: std::time::Instant,
+        window_start: bevy::platform::time::Instant,
     },
 }
 
@@ -642,7 +820,12 @@ impl StreamWatch {
     pub(crate) fn feed(&mut self, handle: &StreamingSoundHandle<FromFileError>, dt: f64) {
         use kira::sound::PlaybackState as S;
         let audible = matches!(handle.state(), S::Playing | S::Stopping);
-        match self.observe(audible, handle.position(), dt, std::time::Instant::now()) {
+        match self.observe(
+            audible,
+            handle.position(),
+            dt,
+            bevy::platform::time::Instant::now(),
+        ) {
             Some(Verdict::Starved {
                 lost,
                 counted,
@@ -683,7 +866,7 @@ impl StreamWatch {
     }
 
     /// Open a counting window: position baseline and wall origin together.
-    fn begin(&mut self, pos: f64, now: std::time::Instant) {
+    fn begin(&mut self, pos: f64, now: bevy::platform::time::Instant) {
         self.phase = Phase::Running {
             last_pos: pos,
             window_start: now,
@@ -697,7 +880,7 @@ impl StreamWatch {
         audible: bool,
         pos: f64,
         dt: f64,
-        now: std::time::Instant,
+        now: bevy::platform::time::Instant,
     ) -> Option<Verdict> {
         // Stopped or paused: the position legitimately holds.
         if !audible {
@@ -1240,14 +1423,14 @@ pub(super) mod tests {
         );
     }
 
-    fn wall(t0: std::time::Instant, secs: f64) -> std::time::Instant {
+    fn wall(t0: bevy::platform::time::Instant, secs: f64) -> bevy::platform::time::Instant {
         t0 + std::time::Duration::from_secs_f64(secs)
     }
 
     #[test]
     fn stream_watch_accounts_freezes_not_swaps() {
         let dt = 1.0 / 60.0;
-        let t0 = std::time::Instant::now();
+        let t0 = bevy::platform::time::Instant::now();
 
         let mut w = StreamWatch::new("test");
         let mut pos = 0.0;
@@ -1331,7 +1514,7 @@ pub(super) mod tests {
     #[test]
     fn stream_watch_spans_the_window_it_counted() {
         let dt = 1.0 / 60.0;
-        let t0 = std::time::Instant::now();
+        let t0 = bevy::platform::time::Instant::now();
         let hitch = 0.298;
         let mut w = StreamWatch::new("test");
 
@@ -1380,7 +1563,7 @@ pub(super) mod tests {
     #[test]
     fn stream_watch_does_not_charge_a_stream_for_starting() {
         let dt = 1.0 / 60.0;
-        let t0 = std::time::Instant::now();
+        let t0 = bevy::platform::time::Instant::now();
         let hitch = 0.298;
         let first_sample = 0.233;
         // Position as the handle reports it: 0 until the first sample, then wall time.
@@ -1428,7 +1611,7 @@ pub(super) mod tests {
     #[test]
     fn stream_watch_names_a_stream_that_never_starts() {
         let dt = 1.0 / 60.0;
-        let t0 = std::time::Instant::now();
+        let t0 = bevy::platform::time::Instant::now();
         let mut w = StreamWatch::new("test");
         let mut waited = Vec::new();
         for i in 0..600 {

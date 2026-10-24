@@ -13,7 +13,8 @@
 //! form's aura holds a slot, warrior stances included) and `SPELL_UPDATE_COOLDOWN`, so the feed
 //! runs before all three; a cooldown's expiry fires nothing.
 
-use std::time::Instant;
+// `bevy::platform::time::Instant`, not `bevy::platform::time::Instant`: this flows into `crate::cooldowns`/`crate::ui_script::UiClock`, which on wasm32 (the default `web` Bevy feature) is a genuinely different type from `bevy::platform::time::Instant` — a plain alias for it everywhere else.
+use bevy::platform::time::Instant;
 
 use bevy::prelude::*;
 

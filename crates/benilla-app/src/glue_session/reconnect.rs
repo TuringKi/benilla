@@ -68,11 +68,11 @@ mod tests {
         }
     }
 
-    type Rx<T> = crossbeam_channel::Receiver<T>;
+    type Rx<T> = async_channel::Receiver<T>;
 
     fn reconnect_app(pending: bool) -> (App, Rx<RealmRequest>, Rx<CharRequest>) {
-        let (realm_tx, realm_rx) = crossbeam_channel::unbounded();
-        let (pick_tx, pick_rx) = crossbeam_channel::unbounded();
+        let (realm_tx, realm_rx) = async_channel::unbounded();
+        let (pick_tx, pick_rx) = async_channel::unbounded();
         let mut roster = if pending {
             Roster::with_pending_pick(vec![test_character(7, "Seven")], 7)
         } else {

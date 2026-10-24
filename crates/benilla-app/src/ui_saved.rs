@@ -35,7 +35,7 @@ pub(crate) fn load_saved_variables(
 ) {
     // `None` in a capture or with no install: nothing is read, and the event still fires.
     if let Some(path) = crate::local_state::saved_variables_path() {
-        match std::fs::read(&path) {
+        match crate::local_state::read(&path) {
             Ok(bytes) => {
                 let lost = script.load_flat_saved_variables(&bytes);
                 info!("saved variables: loaded {}", path.display());

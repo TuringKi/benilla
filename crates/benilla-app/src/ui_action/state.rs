@@ -16,7 +16,7 @@
 
 use crate::ui_items::stack_counts;
 use std::collections::{BTreeSet, HashMap, HashSet};
-use std::time::Instant;
+use bevy::platform::time::Instant;
 
 use bevy::prelude::*;
 

@@ -114,7 +114,7 @@ impl Attempt<'_> {
         self.intent.in_flight = true;
         self.intent.announced = announced;
         self.intent.retry_at = None;
-        let _ = self.submit.0.send(LoginRequest {
+        let _ = self.submit.0.try_send(LoginRequest {
             user: user.to_string(),
             pass: pass.to_string(),
             host: self.realmlist.address().to_string(),
@@ -232,8 +232,10 @@ pub(crate) fn drive_policy(
     if !attempt.intent.env_read {
         attempt.intent.env_read = true;
         if crate::run_mode::env_login() {
-            let user = std::env::var("WOW_USER").unwrap_or_default();
-            let pass = std::env::var("WOW_PASS").unwrap_or_default();
+            // Through `webenv`: a page has no process environment, so these are its env object or
+            // query string there, and `std::env::var` natively.
+            let user = crate::webenv::var("WOW_USER").unwrap_or_default();
+            let pass = crate::webenv::var("WOW_PASS").unwrap_or_default();
             // A vmangos login kicks whoever holds the account, so the automated path logs in
             // only as the checkout's declared account (`.probe-identity`); a typed login is not
             // gated.
@@ -426,8 +428,8 @@ mod tests {
 
     /// `drive_policy` alone with the env fast path spent, so an ambient `WOW_USER` cannot seed
     /// credentials.
-    fn policy_app() -> (App, crossbeam_channel::Receiver<LoginRequest>) {
-        let (tx, rx) = crossbeam_channel::unbounded();
+    fn policy_app() -> (App, async_channel::Receiver<LoginRequest>) {
+        let (tx, rx) = async_channel::unbounded();
         let mut app = App::new();
         app.init_resource::<Time>()
             .init_resource::<LoginIntent>()
@@ -573,7 +575,7 @@ mod tests {
     /// and the session that parked behind its back is abandoned.
     #[test]
     fn a_login_edge_behind_the_abandon_generation_abandons_the_session() {
-        let (tx, rx) = crossbeam_channel::unbounded();
+        let (tx, rx) = async_channel::unbounded();
         let mut app = edge_app(1);
         app.insert_resource(crate::net::CharPick(tx.into()));
         let send = |app: &mut App, generation: u64| {
@@ -612,7 +614,7 @@ mod tests {
     #[test]
     fn the_glue_arms_cancel_keeps_an_unattended_resubmit() {
         let (mut app, requests) = policy_app();
-        let (realm_tx, realm_rx) = crossbeam_channel::unbounded();
+        let (realm_tx, realm_rx) = async_channel::unbounded();
         app.insert_resource(crate::net::RealmChoice(realm_tx.into()))
             .insert_resource(State::new(ClientState::Login))
             .add_message::<GlueLogin>()

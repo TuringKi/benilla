@@ -18,7 +18,11 @@
 //! [`crate::field_watch::FieldNotice::Tutorial`], fired in the watcher's place
 //! ([`TutorialState::fire_now`]).
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+// `std::time::Instant` has no monotonic clock behind it in a browser and panics there;
+// bevy's re-export is std's natively and `web_time`'s on wasm32.
+use bevy::platform::time::Instant;
 
 use bevy::prelude::*;
 
@@ -931,7 +935,7 @@ mod tests {
         // The deferral window: in the world on the wire, the entry load still owed, and a live
         // VM with no frames.
         app.insert_resource(State::new(crate::client_state::ClientState::InWorld));
-        app.insert_resource(crate::ui_script::PendingEntryUiLoad);
+        app.insert_resource(crate::ui_script::PendingEntryUiLoad::default());
         app.insert_non_send_resource(UiScript::new().expect("a frameless VM"));
 
         {

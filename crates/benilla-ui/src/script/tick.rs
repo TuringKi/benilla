@@ -7,7 +7,36 @@ use crate::widget::FrameHandle;
 
 use super::{event, Model, ScriptValue, UiScript};
 
+/// The most events the tap holds between drains — a frame's worth, generously (a busy raid frame
+/// fires a few hundred `UNIT_*`). Past it the tap drops rather than grows: a host that stopped
+/// draining must not turn the VM into a leak.
+const EVENT_TAP_CAP: usize = 4096;
+
 impl UiScript {
+    /// Turn the event tap on or off ([`super::Model::event_tap`]). Turning it off discards
+    /// whatever was tapped and not yet drained; turning it on twice is a no-op.
+    pub fn set_event_tap(&mut self, on: bool) {
+        let mut model = self.model_mut();
+        match (on, model.event_tap.is_some()) {
+            (true, false) => model.event_tap = Some(Vec::new()),
+            (false, true) => model.event_tap = None,
+            _ => {}
+        }
+    }
+
+    /// Drain the events tapped since the last call — every `(name, args)` that went through
+    /// [`fire_event_into`], in dispatch order, whether or not any frame was registered for it.
+    /// That is [`Self::fire_event`] plus the bindings that fire against the VM directly (1924),
+    /// which is the set a host watching the interface wants: an event is an event to the page
+    /// whichever side of the seam raised it. Empty when the tap is off.
+    pub fn take_tapped_events(&mut self) -> Vec<(String, Vec<ScriptValue>)> {
+        self.model_mut()
+            .event_tap
+            .as_mut()
+            .map(std::mem::take)
+            .unwrap_or_default()
+    }
+
     /// Queue an event for the start of the next tick, behind everything queued earlier and before
     /// that tick's `OnUpdate` pass: the host's lane ([`Model::pending_events`]), for a producer
     /// outside any Lua verb. A drain runs a step behind its input, so firing at once would
@@ -33,6 +62,9 @@ impl UiScript {
     }
 }
 
+#[cfg(not(target_os = "macos"))]
+#[path = "wenilla_listener.rs"]
+mod wenilla_listener;
 impl Model {
     /// Raise `event` from engine code. Inside a [`verb`] segment it fires before the verb
     /// returns, once the segment's borrow drops; anywhere else it joins the host queue
@@ -283,17 +315,27 @@ pub(crate) fn show_chat_line_into(lua: &Lua, key: &'static str, text: String) {
 /// An engine step that cannot lend the host holds the walk for it ([`super::host::holding`]).
 pub(crate) fn fire_event_into(lua: &Lua, event: &str, args: Vec<ScriptValue>) {
     let model_mut = || lua.app_data_mut::<Model>().expect("model app_data set");
+    let held = super::host::holding(lua);
     let mut at = {
-        let model = model_mut();
-        model
+        let mut model = model_mut();
+        let first = model
             .event_to_frames
             .get(event)
-            .and_then(|l| l.first().copied())
+            .and_then(|l| l.first().copied());
+        // The event tap copies every fire, listener or not; a held walk is copied as it replays.
+        if !(held && first.is_some()) {
+            if let Some(tap) = model.event_tap.as_mut() {
+                if tap.len() < EVENT_TAP_CAP {
+                    tap.push((event.to_string(), args.clone()));
+                }
+            }
+        }
+        first
     };
     if at.is_none() {
         return;
     }
-    if super::host::holding(lua) {
+    if held {
         super::calls::hold(lua, super::calls::Held::Event(event.to_string(), args));
         return;
     }
@@ -302,20 +344,31 @@ pub(crate) fn fire_event_into(lua: &Lua, event: &str, args: Vec<ScriptValue>) {
     if let Ok(name) = lua.create_string(event) {
         let _ = globals.set("event", name);
     }
+    #[cfg(not(target_os = "macos"))]
+    let mut next_index = 0;
     while let Some(h) = at {
         let mut model = model_mut();
         // A saved next that the previous handler unregistered ends the walk.
-        let Some(pos) = model
-            .event_to_frames
-            .get(event)
-            .and_then(|l| l.iter().position(|&x| x == h))
-        else {
+        let Some(pos) = model.event_to_frames.get(event).and_then(|l| {
+            #[cfg(target_os = "macos")]
+            {
+                l.iter().position(|&x| x == h)
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                wenilla_listener::position(l, &h, next_index)
+            }
+        }) else {
             break;
         };
         let next = model
             .event_to_frames
             .get(event)
             .and_then(|l| l.get(pos + 1).copied());
+        #[cfg(not(target_os = "macos"))]
+        {
+            next_index = pos + 1;
+        }
         let id = model.frame_id(h);
         drop(model);
         if let Err(e) = event::fire_event_handler(lua, id, &args) {

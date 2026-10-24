@@ -168,7 +168,7 @@ mod tests {
     /// database, so the refusal lands in the same drain and must be the last word.
     #[test]
     fn a_refused_login_beats_the_entry_it_revokes() {
-        let (tx, rx) = crossbeam_channel::unbounded();
+        let (tx, rx) = async_channel::unbounded();
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, bevy::state::app::StatesPlugin))
             .insert_state(ClientState::CharSelect)
@@ -215,7 +215,7 @@ mod tests {
     #[test]
     fn a_return_and_its_roster_in_one_drain_show_the_roster() {
         for refused in [false, true] {
-            let (tx, rx) = crossbeam_channel::unbounded();
+            let (tx, rx) = async_channel::unbounded();
             let mut app = App::new();
             app.add_plugins((MinimalPlugins, bevy::state::app::StatesPlugin))
                 .insert_state(ClientState::InWorld)

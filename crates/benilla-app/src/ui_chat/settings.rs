@@ -75,7 +75,7 @@ pub(super) struct ChatWindowFile {
     identity: VmMemo<Option<(String, String)>>,
     /// Whether this VM has unsaved Lua writes, per VM: a replaced VM's stock table must not save.
     dirty: VmMemo<bool>,
-    last_change: Option<std::time::Instant>,
+    last_change: Option<bevy::platform::time::Instant>,
 }
 
 /// A parsed file: its windows (0-based), its `COLORS` rows in file order, its custom channels.
@@ -428,7 +428,7 @@ pub(crate) fn restore_chat_looks(world: &mut World, script: &mut UiScript) {
         let text = file
             .path
             .as_ref()
-            .and_then(|path| match std::fs::read_to_string(path) {
+            .and_then(|path| match crate::local_state::read_to_string(path) {
                 Ok(t) => Some(t),
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
                 Err(e) => {
@@ -536,7 +536,7 @@ fn watch_chat_looks(
             return;
         }
         *file.dirty.get(script) = true;
-        file.last_change = Some(std::time::Instant::now());
+        file.last_change = Some(bevy::platform::time::Instant::now());
     })
 }
 

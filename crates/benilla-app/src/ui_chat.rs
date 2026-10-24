@@ -59,11 +59,12 @@ pub(crate) use broadcast::Broadcast;
 pub(crate) use channels::seed_zone_channel_catalog;
 /// The joined-channel roster and the `ChatChannels.dbc` catalog.
 pub(crate) use edit::ChannelState;
-/// Test-only: `ui_script::chat_tests` checks every fired name against the live `ChatTypeInfo`.
-#[cfg(test)]
+/// `ui_script::chat_tests` checks every fired name against the live `ChatTypeInfo`; in the app the
+/// router and the web bridge (`crate::webbridge`, which names the event on its `chat` line) call it.
 pub(crate) use event::event_name;
 pub(crate) use event::{default_color, ChatEvent, ChatEventKind};
 pub(crate) use feed::{Answer, ChatLog};
+pub(crate) use frames::ChatWindows;
 /// The chat applier off a bare world, for the tests that send through it.
 #[cfg(test)]
 pub(crate) use input::{chat_world, run_chat};
@@ -110,7 +111,7 @@ pub(crate) fn drain_chat_input_once(world: &mut World) {
 }
 /// Test-only: the quest log's rig tees the lines its timers show.
 #[cfg(test)]
-pub(crate) use frames::{tee_shown_lines, ChatWindows};
+pub(crate) use frames::tee_shown_lines;
 /// The per-character chat cache's restore, called from the world-entry UI load: its two events
 /// must precede the session's first chat line and `PLAYER_LOGIN`.
 pub(crate) use settings::restore_chat_looks;

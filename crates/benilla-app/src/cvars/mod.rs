@@ -24,13 +24,16 @@
 //! ([`Cvars::own_for_session`]).
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::time::Instant;
+// std's `Instant` panics on wasm32; bevy's is `web_time` there.
+use bevy::platform::time::Instant;
 
 use bevy::prelude::*;
 
 use crate::ui_script::VmMemo;
 use benilla_ui::script::{CvarCheck, CvarWrite, SeededCvar, UiScript};
 
+#[cfg(any(target_arch = "wasm32", test))]
+mod browser;
 #[cfg(test)]
 mod deviations_doc;
 mod inert;
@@ -802,7 +805,7 @@ impl Cvars {
         let Some(path) = path else {
             return;
         };
-        let name = match std::fs::read_to_string(&path) {
+        let name = match crate::local_state::read_to_string(&path) {
             Ok(text) => text.trim().to_string(),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
             Err(e) => {
@@ -960,6 +963,13 @@ fn load_config(world: &mut World) {
         // `gxApi` is the render backend, a fact about the machine that `sync_cvars` pushes live, so
         // it is never persisted.
         cvars.own_for_session("gxApi", None);
+        // The page's URL settings are session-owned, before the saved file loads.
+        #[cfg(target_arch = "wasm32")]
+        for row in REGISTERED {
+            if let Some(value) = crate::webenv::var(&format!("WOW_{}", row.name)) {
+                browser::apply_override(&mut cvars, row.name, &value);
+            }
+        }
         cvars.announce_locale_defaults();
         let (file_has_account, can_save) = match &stored {
             StoredConfig::Table(t) => (
@@ -1008,7 +1018,7 @@ fn stored_config() -> StoredConfig {
     let Some(path) = crate::local_state::config_path() else {
         return StoredConfig::Absent; // hermetic capture or no install: session-only state
     };
-    let text = match std::fs::read_to_string(&path) {
+    let text = match crate::local_state::read_to_string(&path) {
         Ok(t) => t,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return StoredConfig::Absent,
         Err(e) => return StoredConfig::Bad(format!("config: cannot read {}: {e}", path.display())),
@@ -1207,7 +1217,7 @@ fn write_config(cvars: &mut Cvars) {
             cvars.file = file;
             cvars.dirty = false;
             if let Some(old) = cvars.legacy_account.take() {
-                if let Err(e) = std::fs::remove_file(&old) {
+                if let Err(e) = crate::local_state::remove_file(&old) {
                     if e.kind() != std::io::ErrorKind::NotFound {
                         warn!("config: cannot remove {}: {e}", old.display());
                     }

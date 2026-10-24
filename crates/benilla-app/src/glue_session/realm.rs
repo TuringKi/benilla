@@ -172,7 +172,9 @@ impl RunModeRealm {
     /// The choice as this process's environment makes it.
     pub(crate) fn from_env() -> Self {
         Self {
-            named: std::env::var("WOW_REALM").ok().filter(|s| !s.is_empty()),
+            // Through `webenv`, like every `WOW_*` fast path this crate ships to wasm: a hosted
+            // single-realm player otherwise meets a dialog the realm already knows the answer to.
+            named: crate::webenv::var("WOW_REALM").filter(|s| !s.is_empty()),
             unattended: crate::run_mode::unattended(),
         }
     }

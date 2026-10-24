@@ -66,7 +66,7 @@ fn load_name_cache(
     let Some(path) = path else {
         return; // a hermetic capture, or no state folder: session-only
     };
-    let Ok(text) = std::fs::read_to_string(&path) else {
+    let Ok(text) = crate::local_state::read_to_string(&path) else {
         return; // no cache yet
     };
     match NameCache::from_tsv(&text, &realm) {
@@ -111,12 +111,7 @@ fn write_now(file: &mut NameCacheFile, names: &NameCache) {
     let (Some(path), Some(realm)) = (file.path.clone(), file.realm.clone()) else {
         return;
     };
-    if let Some(dir) = path.parent() {
-        if let Err(e) = std::fs::create_dir_all(dir) {
-            warn!("names: cannot create {}: {e}", dir.display());
-            return;
-        }
-    }
+    // `write_atomic` creates the folder itself (and has none to create on the web).
     match crate::local_state::write_atomic(&path, &names.to_tsv(&realm)) {
         Ok(()) => {
             file.saved_generation = names.generation();

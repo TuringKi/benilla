@@ -1210,6 +1210,10 @@ pub(crate) struct Model {
     /// `SignalEvent` (`0x703e50`, `0x703f50`) runs every handler before it returns, so a verb's
     /// events fire inside the call, through [`super::tick::verb`].
     pub(crate) pending_events: Vec<(String, Vec<ScriptValue>)>,
+    /// The event tap: every event `fire_event` dispatches, copied for a host-side observer that
+    /// is not a frame (the web bridge). `None` is off, the default; the host drains it once per
+    /// frame (`UiScript::take_tapped_events`), and an undrained tap is capped.
+    pub(crate) event_tap: Option<Vec<(String, Vec<ScriptValue>)>>,
     /// The events the running [`super::tick::verb`] segment has raised, fired in order once its
     /// model borrow drops; `None` outside a segment, where [`Model::raise`] queues instead.
     pub(crate) verb_events: Option<Vec<super::tick::Raised>>,
@@ -1763,6 +1767,7 @@ impl Model {
             chat_bubbles: super::chat_bubble::ChatBubbles::default(),
             worldstate: super::worldstate::WorldStateUiState::default(),
             pending_events: Vec::new(),
+            event_tap: None,
             verb_events: None,
             item_locks: std::collections::HashSet::new(),
             cursor_pos: (0.0, 0.0),

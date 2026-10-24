@@ -3,7 +3,10 @@
 //! ([`super::inflight`], [`super::cooldowns`], [`super::mods`]) and the windows' stores through
 //! [`Lifecycle`] and [`Scene`].
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+// `bevy::platform::time::Instant`, not `bevy::platform::time::Instant`: this flows into `crate::cooldowns`/`crate::ui_script::UiClock`, which on wasm32 (the default `web` Bevy feature) is a genuinely different type from `bevy::platform::time::Instant` — a plain alias for it everywhere else.
+use bevy::platform::time::Instant;
 
 use benilla_formats::LearnAnnouncement;
 use benilla_protocol::messages::{ActionButton, SpellCooldown};

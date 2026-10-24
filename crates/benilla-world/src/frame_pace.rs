@@ -12,7 +12,9 @@
 //! off, and a manual `TimeUpdateStrategy` is never paced.
 
 use std::collections::VecDeque;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+// Bevy's `Instant`, not std's: std's panics on wasm32, and `Time<Real>` hands back Bevy's.
+use bevy::platform::time::Instant;
 
 use bevy::prelude::*;
 use bevy::time::{Real, TimeSystems, TimeUpdateStrategy, Virtual};
@@ -266,13 +268,13 @@ pub(crate) fn pace_frame_time(
 #[derive(Resource)]
 struct FixedDt {
     dt: Duration,
-    at: std::time::Instant,
+    at: bevy::platform::time::Instant,
     armed: bool,
 }
 
 /// Installs the manual strategy once the wall clock passes the arm time, and logs it.
 fn arm_fixed_dt(mut cfg: ResMut<FixedDt>, mut commands: Commands) {
-    if cfg.armed || std::time::Instant::now() < cfg.at {
+    if cfg.armed || bevy::platform::time::Instant::now() < cfg.at {
         return;
     }
     cfg.armed = true;
@@ -298,7 +300,7 @@ pub fn plugin(app: &mut App) {
     }) {
         app.insert_resource(FixedDt {
             dt: Duration::from_secs_f64(ms / 1000.0),
-            at: std::time::Instant::now() + Duration::from_secs_f64(after.max(0.0)),
+            at: bevy::platform::time::Instant::now() + Duration::from_secs_f64(after.max(0.0)),
             armed: false,
         })
         .add_systems(First, arm_fixed_dt.before(TimeSystems));

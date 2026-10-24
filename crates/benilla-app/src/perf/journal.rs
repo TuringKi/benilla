@@ -10,7 +10,9 @@
 //! `gpu_other`.
 
 use std::path::PathBuf;
-use std::time::Instant;
+// `std::time::Instant` panics on wasm32 (no monotonic clock behind it); bevy's re-export is
+// `web_time` there and std's everywhere else. Same carry as `net.rs` and `items.rs`.
+use bevy::platform::time::Instant;
 
 use bevy::diagnostic::DiagnosticsStore;
 use bevy::prelude::*;
@@ -19,6 +21,10 @@ use bevy::render::renderer::{RenderAdapterInfo, RenderDevice};
 use bevy::time::Real;
 
 use super::clock::{main_thread_cpu_secs, process_cpu_secs};
+
+#[cfg(target_arch = "wasm32")]
+#[path = "journal_web.rs"]
+mod web;
 
 pub(crate) struct FpsJournalPlugin;
 
@@ -45,12 +51,27 @@ impl Plugin for FpsJournalPlugin {
     fn build(&self, app: &mut App) {
         // Bevy's per-pass render diagnostics, the source of the GPU columns and of Tracy's GPU
         // zones, registered in every build.
-        app.add_plugins(RenderDiagnosticsPlugin)
-            .init_resource::<FpsJournalSetting>()
+        #[cfg(not(target_arch = "wasm32"))]
+        app.add_plugins(RenderDiagnosticsPlugin);
+        // wenilla: in the browser only when the journal is armed from the URL — the per-pass
+        // spans and their readback cost ~5 % of a login-screen frame there.
+        #[cfg(target_arch = "wasm32")]
+        if ["WOW_FPS_JOURNAL", "fpsJournal"]
+            .iter()
+            .any(|k| crate::webenv::var(k).is_some_and(|v| !v.is_empty() && v != "0"))
+        {
+            app.add_plugins(RenderDiagnosticsPlugin);
+        }
+        app.init_resource::<FpsJournalSetting>()
             .add_observer(on_cvar)
             .insert_resource(FpsJournal {
+                #[cfg(not(target_arch = "wasm32"))]
                 env_path: std::env::var("WOW_FPS_JOURNAL")
                     .ok()
+                    .filter(|p| !p.is_empty())
+                    .map(PathBuf::from),
+                #[cfg(target_arch = "wasm32")]
+                env_path: crate::webenv::var("WOW_FPS_JOURNAL")
                     .filter(|p| !p.is_empty())
                     .map(PathBuf::from),
                 path: None,
@@ -301,6 +322,7 @@ fn journal_fps(
                 return; // hermetic: no state folder
             };
             // The header goes in once, at creation; rows append across runs.
+            #[cfg(not(target_arch = "wasm32"))]
             if !path.exists() {
                 let head = format!(
                     "{}{JOURNAL_HEADER}",
@@ -311,7 +333,15 @@ fn journal_fps(
                     return;
                 }
             }
+            #[cfg(target_arch = "wasm32")]
+            web::begin(&format!(
+                "{}{JOURNAL_HEADER}",
+                preamble(gpu.adapter.as_deref(), gpu.device.as_deref())
+            ));
+            #[cfg(not(target_arch = "wasm32"))]
             info!("fps journal: writing {}", path.display());
+            #[cfg(target_arch = "wasm32")]
+            info!("fps journal: recording the latest hour; use the download FPS journal button");
             journal.last_flush = now;
             journal.cpu_at_flush = process_cpu_secs();
             journal.main_at_flush = main_thread_cpu_secs();
@@ -385,16 +415,21 @@ fn journal_fps(
     let gpu_cells = journal.gpu.columns();
     line.push_str(&gpu_cells);
     line.push('\n');
-    use std::io::Write;
-    let Some(path) = journal.path.as_ref() else {
-        return;
-    };
-    if let Ok(mut f) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
+    #[cfg(target_arch = "wasm32")]
+    web::append(&line);
+    #[cfg(not(target_arch = "wasm32"))]
     {
-        let _ = f.write_all(line.as_bytes());
+        use std::io::Write;
+        let Some(path) = journal.path.as_ref() else {
+            return;
+        };
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+        {
+            let _ = f.write_all(line.as_bytes());
+        }
     }
 }
 

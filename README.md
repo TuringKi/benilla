@@ -8,12 +8,37 @@
   </p>
 </div>
 
-benilla plays the whole game: character creation, questing and professions, dungeons and raids,
-battlegrounds and honor, groups, guilds, trade, mail and the auction house, on the stock 1.12
-interface and with your addons. It connects to a 1.12.1 server over the original protocol and
-reads the game's data from your own 1.12.1 install. Every file format, the network protocol and
-the interface engine are written from scratch, with no original client code, no third-party WoW
-crates and no bundled game assets.
+## wenilla — this fork: benilla in a browser tab
+
+Turtle 中文客户端的构建、版本配置和局域网运行说明见 [TURTLE-WEB](docs/TURTLE-WEB.md)。
+
+This fork adds **wenilla** on `main`: the same client compiled to WebAssembly, so a 1.12.1
+server can be played from a browser with nothing installed — login, character select and the
+world, with the full FrameXML/Lua UI, over a WebSocket. Nothing is rewritten: raw TCP becomes a
+WebSocket through a small host (`wenilla-host`), the MPQ chain becomes single files fetched over
+HTTP, and the C Lua 5.1 VM is compiled for wasm with the wasi-sdk sysroot. WebGPU is required
+for the world; the host proxies only to the server you point it at, and never sends the MPQs.
+
+```bash
+scripts/web-setup.sh                                   # once: wasm target, wasm-bindgen, wasi-sdk (no sudo)
+scripts/web-build.sh                                   # → web/dist/
+cargo run --release -p wenilla-host -- --www web/dist --data /path/to/WoW/Data
+# open http://127.0.0.1:8090/
+```
+
+`wenilla-host` is a local testing tool: it serves the game data you point it at with no login,
+so keep it on loopback or a private network and never on the open internet. Hosting players
+is [`wenilla-realm`](crates/wenilla-realm/README.md), which gates everything behind a session.
+See [`web/README.md`](web/README.md) for the how and the porting notes, [`AGENTS.md`](AGENTS.md)
+for the map of the repository and the rules that bite, and [`docs/UPSTREAM.md`](docs/UPSTREAM.md)
+for how upstream is merged in. Everything else below is upstream benilla's README, unchanged;
+upstream is [samwhosung/benilla](https://github.com/samwhosung/benilla), merged into `main` as it
+publishes, and the web work is meant to be upstreamable piece by piece.
+
+benilla speaks the original 1.12.1 protocol, so it connects to any server the real client could,
+and reads its game data at runtime from your own 1.12.1 install. Every file format and the network
+protocol are implemented from scratch, with no original client code, no third-party WoW crates,
+and no bundled game assets.
 
 What the real client does is read at its bytes in
 [benilla-re](https://github.com/samwhosung/benilla-re), the reverse engineering benilla is built

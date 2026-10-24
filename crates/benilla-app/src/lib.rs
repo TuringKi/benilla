@@ -39,6 +39,7 @@ mod client_state;
 mod combat_log;
 mod combat_text;
 mod console;
+#[cfg(not(target_arch = "wasm32"))]
 mod crash;
 mod creature_anim;
 mod creature_type;
@@ -189,6 +190,13 @@ mod video;
 mod vm_pass;
 mod vplates;
 mod weapon_trail;
+mod webbridge;
+/// The web build's env-var stand-in (a browser tab has no process environment) — see the
+/// module doc. `pub` because the plan's "Env/config on web" interface names it as
+/// `benilla_app::webenv::var` by that exact path; every in-crate caller still just writes
+/// `crate::webenv::var` like any other module.
+pub mod webenv;
+mod webprogress;
 mod world_backdrop;
 mod world_console;
 mod world_state;
@@ -271,6 +279,8 @@ fn launch(build: BuildId, extend: Option<Extension<'_>>) -> AppExit {
 
     // From here a panic leaves `benilla-config/Diagnostics/crash-<unix>.txt`; armed before the
     // `App` exists, so a panic while plugins build is reported too.
+    // The browser entry installs console_error_panic_hook; filesystem reports are native.
+    #[cfg(not(target_arch = "wasm32"))]
     crash::install(build);
 
     // Fonts, art and the stock interface all come from the install, so without one the client
@@ -436,6 +446,11 @@ fn launch(build: BuildId, extend: Option<Extension<'_>>) -> AppExit {
         start: run_mode::start_state(),
     });
 
+    app.add_plugins(webbridge::WebBridgePlugin);
+    // Addon saved variables are read back from the page's state store (`benilla_ui::web_saved`).
+    #[cfg(target_arch = "wasm32")]
+    benilla_ui::web_saved::set_reader(local_state::read);
+
     // benilla-assets' loaders go into the live `AssetServer`, so they register after `AssetPlugin`.
     benilla_assets::register_asset_loaders(&mut app);
 
@@ -460,6 +475,9 @@ fn launch(build: BuildId, extend: Option<Extension<'_>>) -> AppExit {
             eprintln!("executor: no render app — ExtractSchedule flip NOT applied");
         }
     }
+
+    // Boot-progress bridge (webprogress.rs): tell the hosting page the Startup pile is done.
+    app.add_systems(PostStartup, webprogress::signal_startup);
 
     // A crate on top of benilla adds its plugins here ([`run_with`]).
     if let Some(extend) = extend {

@@ -6,7 +6,9 @@
 //! (`0x4aa090`), which fires `BATTLEFIELDS_CLOSED`, the window's only engine-side close, once the
 //! player is more than 5.5556 yd from the anchor.
 
-use std::time::Instant;
+// `std::time::Instant` has no monotonic clock behind it in a browser and panics there;
+// bevy's re-export is std's natively and `web_time`'s on wasm32.
+use bevy::platform::time::Instant;
 
 use bevy::prelude::*;
 

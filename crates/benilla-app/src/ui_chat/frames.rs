@@ -15,6 +15,13 @@ pub(crate) struct ChatWindows {
     /// The frame's `this.defaultLanguage`, the faction tongue `GetDefaultLanguage()` answers;
     /// empty until the player and `Languages.dbc` are loaded.
     pub default_language: String,
+    /// Whether a non-window observer wants [`Self::routed`] filled — set by the web bridge
+    /// while a page is listening, off otherwise so an unobserved session never clones a line.
+    pub observe: bool,
+    /// Every event [`route`] delivered since the observer last drained it, in delivery order —
+    /// the same lines the windows and the Lua fire saw, one copy each. Empty unless
+    /// [`Self::observe`] is on.
+    pub routed: Vec<ChatEvent>,
     /// The `LoggingChat`/`LoggingCombat` files, teed in [`route`].
     pub logs: super::logging::ChatLogFiles,
 }
@@ -60,6 +67,10 @@ pub(crate) fn route(
         windows.logs.record(kind.is_combat_log(), &line);
     }
     script.fire_event(event_name(kind), event.script_args());
+    // ── and the observer that is not a frame (the web bridge), after both ──
+    if windows.observe {
+        windows.routed.push(event.clone());
+    }
 }
 
 /// `ChatFrame_OnEvent`'s composition (`ChatFrame.lua:1369-1468`); `None` for a notice the 1.12 UI

@@ -1,8 +1,9 @@
 //! The server-authored path walk ([`Spline`], `SMSG_MONSTER_MOVE`) and the terrain re-ground
 //! that goes with it ([`ground_clamp_creatures`]).
 
+use bevy::platform::time::Instant;
 use std::sync::OnceLock;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use benilla_assets::coords::{bevy_to_wow, wow_to_bevy};
 use benilla_protocol::{CreateSpline, EntityKind};
@@ -497,7 +498,7 @@ pub(in crate::net) fn ground_clamp_creatures(
 ) {
     let cost = clamp_cost_enabled();
     let legacy = clamp_seat_disabled();
-    let t0 = cost.then(std::time::Instant::now);
+    let t0 = cost.then(bevy::platform::time::Instant::now);
     let (mut visited, mut skipped, mut held, mut cast, mut swept, mut hit_n, mut moved) =
         (0u32, 0u32, 0u32, 0u32, 0u32, 0u32, 0u32);
     // Walker-arm counters: `noflr` counts frames whose swept step found no floor (nonzero while the

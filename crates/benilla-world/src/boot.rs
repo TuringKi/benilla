@@ -6,8 +6,23 @@ use bevy::prelude::*;
 
 use crate::thread_qos;
 
+#[cfg(target_arch = "wasm32")]
+mod web_spans;
+
 /// `DefaultPlugins` with benilla's engine tuning applied, around the caller's primary window.
-pub fn tuned_default_plugins(primary_window: Window) -> PluginGroupBuilder {
+#[cfg_attr(not(target_arch = "wasm32"), allow(unused_mut))]
+pub fn tuned_default_plugins(mut primary_window: Window) -> PluginGroupBuilder {
+    // The web build's canvas binding: with no `canvas` selector winit creates its own `<canvas>`
+    // and appends it to `<body>` at a fixed size, ignoring the full-viewport element
+    // `web/index.html` already gives it — so bind to that one by id instead and let it own the
+    // surface. `prevent_default_event_handling` stops the page from scrolling/zooming under our
+    // own keyboard and touch/wheel input (the browser's defaults for those events).
+    #[cfg(target_arch = "wasm32")]
+    {
+        primary_window.canvas = Some("#benilla".into());
+        primary_window.fit_canvas_to_parent = true;
+        primary_window.prevent_default_event_handling = true;
+    }
     DefaultPlugins
         .set(WindowPlugin {
             primary_window: Some(primary_window),
@@ -18,7 +33,10 @@ pub fn tuned_default_plugins(primary_window: Window) -> PluginGroupBuilder {
         // Quiet wgpu/naga; the ring keeps the last stderr lines for the crash report (`log_ring`).
         .set(bevy::log::LogPlugin {
             filter: "wgpu=error,naga=warn".into(),
+            #[cfg(not(target_arch = "wasm32"))]
             custom_layer: |_| Some(Box::new(crate::log_ring::LogRing)),
+            #[cfg(target_arch = "wasm32")]
+            custom_layer: web_spans::custom_layer,
             ..default()
         })
         // Asset loads parse synchronously on the IO pool, and Bevy's default 4 threads saturate on

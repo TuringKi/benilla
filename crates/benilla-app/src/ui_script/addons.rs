@@ -52,7 +52,10 @@ impl Addon {
     /// benilla's layer, [`super::manifest::LAYER_MANIFEST`], which is in the binary and so cannot
     /// be missing.
     pub(super) fn layer() -> Self {
-        Self::shipped(super::manifest::LAYER_MANIFEST)
+        let layer = Self::shipped(super::manifest::LAYER_MANIFEST);
+        #[cfg(not(target_os = "macos"))]
+        let layer = super::turtle_compat::layer(layer);
+        layer
     }
 
     /// The interface one shipped `.toc` names.
@@ -582,7 +585,7 @@ pub(crate) struct AppAddonFiles;
 impl benilla_ui::script::AddonStateFiles for AppAddonFiles {
     fn read(&self, realm: &str, character: &str) -> Option<Vec<(String, bool)>> {
         let id = (realm.to_string(), character.to_string());
-        let bytes = std::fs::read(enable_state_path(Some(&id))?).ok()?;
+        let bytes = crate::local_state::read(&enable_state_path(Some(&id))?).ok()?;
         Some(parse_enable_state(&benilla_ui::source::decode(&bytes)))
     }
 

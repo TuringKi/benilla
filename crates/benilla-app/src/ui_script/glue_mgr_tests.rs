@@ -2025,10 +2025,10 @@ fn a_call_before_the_seat_runs_on_the_seating_frame() {
 /// screen. Returns it, the credentials channel and the abandon generation.
 fn stock_app() -> (
     App,
-    crossbeam_channel::Receiver<LoginRequest>,
+    async_channel::Receiver<LoginRequest>,
     Arc<AtomicU64>,
 ) {
-    let (tx, rx) = crossbeam_channel::unbounded();
+    let (tx, rx) = async_channel::unbounded();
     let abandon = Arc::new(AtomicU64::new(0));
     let mut app = App::new();
     app.init_resource::<Time>()

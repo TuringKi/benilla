@@ -559,8 +559,8 @@ fn feed_server_clock(
         let synced = seen.map_or(0, |was| samples.saturating_sub(was));
         *seen = Some(samples);
         let Some(now) = clock.now_unix() else {
-            let local = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
+            let local = web_time::SystemTime::now()
+                .duration_since(web_time::UNIX_EPOCH)
                 .map_or(0.0, |d| d.as_secs_f64());
             script.set_local_unix_time(local);
             return;

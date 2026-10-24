@@ -35,6 +35,8 @@ pub(crate) use input::feed_wheel;
 pub(crate) mod layer_tests;
 mod load_log;
 mod manifest;
+#[cfg(not(target_os = "macos"))]
+mod turtle_compat;
 
 /// The stock FrameXML this client runs off the player's own patch chain; its header is the rule.
 mod reference_ui;
@@ -199,10 +201,11 @@ pub(crate) struct UiInput;
 /// `Cooldown.lua:3` gates on `start > 0`, so a reset would hide every running cooldown's sweep.
 #[derive(Resource)]
 pub(crate) struct UiClock {
-    /// [`FrameStep::at`] at the tick that produced [`Self::ui_now`].
+    /// [`FrameStep::at`] at the tick that produced [`Self::ui_now`]. Bevy's `Instant`, not std's:
+    /// std's panics on wasm32, where the two are different types (`web_time::Instant` there).
     ///
     /// [`FrameStep::at`]: benilla_world::frame_pace::FrameStep::at
-    pub(crate) anchor: std::time::Instant,
+    pub(crate) anchor: bevy::platform::time::Instant,
     /// The VM clock after that tick, in seconds since this process started.
     pub(crate) ui_now: f64,
 }
@@ -211,7 +214,7 @@ pub(crate) struct UiClock {
 impl Default for UiClock {
     fn default() -> Self {
         Self {
-            anchor: std::time::Instant::now(),
+            anchor: bevy::platform::time::Instant::now(),
             ui_now: 0.0,
         }
     }
