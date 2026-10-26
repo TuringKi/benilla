@@ -19,11 +19,13 @@ cargo build --locked --release -p wenilla-host
 
 ## 运行
 
+手动运行时先设置 `GAME_HOST` 为游戏服主机；推荐使用下节的参数化部署脚本。
+
 ```bash
 target/release/wenilla-host \
   --www web/dist \
   --data /path/to/client/Data \
-  --upstream 192.168.1.79 \
+  --upstream "$GAME_HOST" \
   --auth-port 3725 \
   --world-port 8091
 ```
@@ -33,40 +35,74 @@ target/release/wenilla-host \
 `world_client_build: '5875'` 和 `turtle_compat: '1'`。连接其他服务端时按其要求调整；
 不配置 build 覆盖时，协议库仍默认使用 5875。
 
-浏览器连接地址的 `host` 参数是登录服地址，例如
-`https://192.168.1.79:8443/?host=192.168.1.79%3A3725`。
-世界端口由服务端角色列表中的地址决定，同时需要在 host 的允许端口中配置。
+浏览器连接地址由部署脚本输出，`host` 参数是登录服地址。世界端口由服务端
+角色列表中的地址决定，需与部署参数 `--world-port` 一致。
 
-## 局域网 HTTPS
+## 参数化部署：局域网与 VPN HTTPS
 
-WebGPU 需要安全上下文。使用局域网 IP 访问时，在前面配置 HTTPS 反向代理，
-并让访问电脑信任对应的 TLS 证书。后端默认仍监听 `127.0.0.1:8090`。
-以下片段放在 nginx 的 `http` 内，替换证书路径和监听地址：
+需要 Linux、Python 3、nginx、OpenSSL。首次构建还需按 `scripts/web-setup.sh`
+安装 Rust/WASM 工具链。所有网络地址均由运行参数传入，仓库中不保存部署地址。
 
-```nginx
-map $http_upgrade $connection_upgrade {
-    default upgrade;
-    '' close;
-}
-server {
-    listen 192.168.1.79:8443 ssl;
-    server_name 192.168.1.79;
-    ssl_certificate /path/to/lan-server.crt;
-    ssl_certificate_key /path/to/lan-server.key;
-    location / {
-        proxy_pass http://127.0.0.1:8090;
-        proxy_http_version 1.1;
-        proxy_set_header Host $http_host;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection $connection_upgrade;
-        proxy_read_timeout 3600s;
-        proxy_send_timeout 3600s;
-        proxy_buffering off;
-    }
-}
+先设置本机变量（将尖括号占位内容替换成自己的值）：
+
+```bash
+WEB_IP='<网页服务所在的本机地址>'
+VPN_IP='<可选的本机 VPN 地址>'
+GAME_HOST='<登录服和世界服所在的主机>'
+WOW_DATA='<客户端 Data 目录>'
+ADDONS_DIR='<可选的独立 AddOns 目录>'
 ```
 
-保留后端的 COOP/COEP 响应头。证书私钥、游戏资源、账号密码和运行日志仅保存在本机。
+首次构建并启动：
+
+```bash
+python3 scripts/deploy-web.py up --build \
+  --listen-ip "$WEB_IP" \
+  --game-host "$GAME_HOST" \
+  --data "$WOW_DATA" \
+  --addons "$ADDONS_DIR" \
+  --auth-port 3725 --world-port 8091
+```
+
+如需同时提供 VPN 入口，再添加 `--listen-ip "$VPN_IP"`。只填写本机已配置的接口
+地址，不使用通配监听；未安装插件时省略 `--addons`。脚本会打印游戏入口和 CA 证书
+下载地址，访问端需信任该 CA 才能正常使用 HTTPS/WebGPU。
+
+默认端口：内部后端 8090、HTTP 8093、HTTPS 8443。可用 `--backend-port`、
+`--http-port`、`--https-port` 修改。内部后端只监听本机回环接口。
+
+已有构建产物时，省略 `--build`；产物默认取自 `web/dist`。可通过 `--www` 指定
+其他构建目录，或通过 `--host-bin` 指定已有的 `wenilla-host` 可执行文件。
+`--build` 与 `--host-bin` 不同时使用；自定义 Cargo 产物目录用 `CARGO_TARGET_DIR`。
+
+```bash
+python3 scripts/deploy-web.py up \
+  --listen-ip "$WEB_IP" --listen-ip "$VPN_IP" \
+  --game-host "$GAME_HOST" --data "$WOW_DATA" --addons "$ADDONS_DIR" \
+  --auth-port 3725 --world-port 8091 \
+  --host-bin '<已有 wenilla-host 可执行文件>'
+```
+
+重复执行 `up` 会发布新静态文件并重载 nginx；后端命令未变化时保留现有后端进程。
+更新程序后，访问端刷新页面。已有诊断接收器时加 `--diagnostics-port` 指定其端口。旧测试入口 `render-test/` 始终共用主入口文件，避免漏更新。
+
+```bash
+python3 scripts/deploy-web.py status
+python3 scripts/deploy-web.py stop
+# 按本机保存的参数重新启动（不重新构建）：
+bash .web-deploy/start.local.sh
+```
+
+运行配置、证书、私钥、日志、PID 和发布文件默认存于被 Git 忽略的 `.web-deploy/`，
+目录仅允许当前用户访问。`--state-dir` 可以指定其他目录；仓库内的自定义目录必须
+已被 Git 忽略。后续 `up/status/stop` 使用同一目录。`stop` 只停止该目录管理的进程。
+发布保留先前版本，私钥和游戏资源不复制到 Git。
+
+已有 CA 时，首次 `up` 加 `--ca-cert '<原 CA 证书>' --ca-key '<原 CA 私钥>'`；
+以后会复用状态目录中的 CA。增加监听地址时重新执行带完整地址列表的 `up`，
+服务器证书会覆盖所有传入地址，不要求客户端重新安装同一个 CA。
+
+此部署供可信局域网或私有 VPN 使用，数据接口没有用户认证，不应用于公开互联网。
 
 ## 界面修复与诊断
 
@@ -88,7 +124,7 @@ python3 scripts/ui-report-server.py
 ```nginx
 location = /ui-report {
     client_max_body_size 64k;
-    proxy_pass http://127.0.0.1:8092;
+    proxy_pass http://localhost:8092;
 }
 ```
 

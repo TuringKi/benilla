@@ -54,3 +54,6 @@ __pycache__/
 
 # Local browser UI diagnostic reports.
 /scripts/ui-browser-reports.jsonl
+
+# Private web deployment configuration, TLS keys, logs and published bundles.
+/.web-deploy/

@@ -14,7 +14,7 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-DIST=web/dist
+DIST="${WEB_DIST:-web/dist}"
 BACKEND="${WEB_BACKEND:-webgpu}"
 # `release` by default. `ship` (fat LTO, one codegen unit) measured ~3 % less CPU per frame on the
 # login screen and a 13 % smaller module (80 -> 70 MB), but its single LTO link of the whole
